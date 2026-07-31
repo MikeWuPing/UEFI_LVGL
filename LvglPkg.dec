@@ -1,0 +1,16 @@
+[Defines]
+  DEC_SPECIFICATION              = 0x00010005
+  PACKAGE_NAME                   = LvglPkg
+  PACKAGE_GUID                   = 4BF20C1E-E7EE-44A6-AC14-906A664C7090
+  PACKAGE_VERSION                = 0.1
+
+[Includes]
+  Include
+
+[LibraryClasses]
+  # NOTE: keep this file pure ASCII - BaseTools reads meta files with the
+  # OS locale encoding (cp936 here), non-ASCII bytes can break the parser.
+  ##  LVGL v9 graphics library (built from the pristine upstream source mirror)
+  LvglLib|Include/Library/LvglLib.h
+  ##  LVGL UEFI port layer (GOP display, keyboard/mouse indev, tick, memory)
+  LvglUefiPort|Include/Library/LvglUefiPort.h

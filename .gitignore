@@ -1,0 +1,12 @@
+# edk2 build output (see OUTPUT_DIRECTORY in LvglPkg.dsc)
+Build/
+
+# Python (GenLvglSources.py)
+__pycache__/
+*.pyc
+
+# Editor / OS noise
+.vs/
+.idea/
+*.swp
+Thumbs.db

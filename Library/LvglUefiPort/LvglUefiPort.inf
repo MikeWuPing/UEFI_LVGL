@@ -1,0 +1,73 @@
+## @file
+# LVGL UEFI port layer (GOP display, keyboard/mouse indev, tick, memory).
+# InputKeyboard.c: SimpleTextInEx (preferred, reports Ctrl/Shift modifiers
+# via LvglKbdGetModifiers) with SimpleTextIn fallback. InputMouse.c:
+# AbsolutePointer (preferred, absolute coordinate mapping) with
+# SimplePointer fallback (buttons only, relative motion not accumulated).
+#
+# NOTE: keep this file pure ASCII - BaseTools reads meta files with the
+# OS locale encoding (cp936 here), non-ASCII bytes can break the parser.
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = LvglUefiPort
+  FILE_GUID                      = 7B58AE45-62ED-4654-847E-EE47B63B007C
+  MODULE_TYPE                    = UEFI_DRIVER
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = LvglUefiPort
+
+  # MODULE_TYPE must be UEFI_DRIVER (not BASE): the port consumes gBS and
+  # AllocatePool(), and the MdePkg instances of UefiBootServicesTableLib /
+  # UefiMemoryAllocationLib / UefiLib all restrict their LIBRARY_CLASS to
+  # DXE-phase module types. A BASE module cannot legally consume them.
+
+[BuildOptions]
+  # Do NOT define LV_CONF_INCLUDE_SIMPLE for this module. lv_conf.h lives in
+  # the LvglLib module directory, which is not on this module's include path,
+  # so #include "lv_conf.h" would fail here. Without LV_CONF_INCLUDE_SIMPLE,
+  # lv_conf_internal.h falls back to #include "../../lv_conf.h", resolved
+  # relative to lvgl/src/, which lands exactly on
+  # LvglPkg/Library/LvglLib/lv_conf.h. Same effective config as LvglLib.
+  # The /wd* set is a subset of LvglLib.inf's: it covers warnings tripped by
+  # LVGL headers included from the port's own TUs plus the UTF-8 CJK comments
+  # in lv_conf.h / LvglLib.h / LvglUefiPort.h (/wd4819). The four suppressions
+  # LvglLib.inf needs only for LVGL upstream .c files (/wd4018 /wd4221
+  # /wd4245 /wd4389) are deliberately not repeated here.
+  # /utf-8: this module's own sources carry UTF-8 CJK comments; decoding
+  # them as UTF-8 (instead of the ANSI code page) avoids both C4819 and the
+  # classic GBK-misdecode line-splice bug where a trailing trail-byte eats
+  # the newline and swallows the following line.
+  MSFT:*_*_*_CC_FLAGS = /utf-8 /wd4189 /wd4244 /wd4267 /wd4100 /wd4204 /wd4819 /WX-
+
+[Sources]
+  MemAlloc.c
+  TickTimer.c
+  DisplayGop.c
+  InputKeyboard.c
+  InputMouse.c
+  LvglUefiPort.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  LvglPkg/LvglPkg.dec
+
+# Protocol GUIDs referenced by the port sources. Declaring them here makes
+# AutoGen emit the GUID definitions into this library once, so every
+# consuming module links cleanly. Without this section the final link of
+# any application using the port fails with LNK2001 on these externs.
+[Protocols]
+  gEfiGraphicsOutputProtocolGuid      ## CONSUMES
+  gEfiSimpleTextInputExProtocolGuid   ## CONSUMES
+  gEfiSimplePointerProtocolGuid       ## CONSUMES
+  gEfiAbsolutePointerProtocolGuid     ## CONSUMES
+  # InputMouse.c ConSplitter hardening: real USB mouse child handles carry
+  # a device path, the virtual ConSplitter handle does not.
+  gEfiDevicePathProtocolGuid          ## CONSUMES
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  MemoryAllocationLib
+  DebugLib
+  UefiBootServicesTableLib
+  UefiLib
