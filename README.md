@@ -151,7 +151,7 @@ GuiMain (VOID)
 - **tick 回调必须在 `lv_init()` 之后挂接。** `lv_global_init()` 会对整个 LVGL 全局状态 memzero（含 tick 回调），提前挂接会被悄悄清零，tick 冻结在 0。节拍源选 TSC 是因为 DXE 应用可用的 `TimerLib` 实例各有硬伤：空模板直接 ASSERT、APIC 定时器固件从不启动、AcpiTimerLib 是 24bit PM 定时器约 4.7 秒回绕一次。
 - **按下/抬起沿合成。** `ReadKeyStroke(Ex)` 只上报按下；LVGL 的 keypad indev 只在上升沿（`PRESSED` after `RELEASED`）派发键值。连续两个 PRESSED 中间没有 RELEASED，第二个键会被当成"正在按下"长按重复——快速打字必然丢键。驱动在消费下一个键前先补发一条同键值的 `RELEASED`。
 - **`SimpleTextInEx` 才有修饰键。** 扩展协议的 `KeyShiftState` 是 UEFI 里读 Ctrl/Shift 的唯一途径；兜底路径按键可用但无修饰键信息（初始化时打 `DEBUG_WARN` 提示组合键不可用）。
-- **绝对指针优先。** 相对 `SimplePointer` 没有可靠的绝对位置，所以优先绝对设备，按 `CurrentX × 屏宽 / MaxX` 线性映射。ConSplitter 的虚拟聚合句柄"协议存在"却永远读不到物理输入，通过优先打开带设备路径的实例来绕过（虚拟句柄不是设备，没有设备路径）。
+- **真实绝对指针优先。** 绝对设备按 `CurrentX × 屏宽 / MaxX` 线性映射；`SimplePointer` 从屏幕中心累计相对位移，按 `max(1, Resolution / 16)` counts-per-pixel 缩放并保留亚像素余数，最终钳制到屏幕边界。协议选择顺序是“真实 Absolute → 真实 Simple → fallback Absolute → fallback Simple”，避免 ConSplitter 虚拟 Absolute 抢占真实相对设备（真实设备带设备路径，虚拟聚合句柄没有）。
 - **给 pool 补 `realloc`。** UEFI 内存池没有 realloc 语义，每个块前多开 8 字节记录请求尺寸，`alloc → copy → free` 模拟之。初始化时自检覆盖 `NULL`-realloc、扩容、收缩三条路径，失败即按致命错误中止初始化。
 
 ## 配置说明
@@ -179,7 +179,7 @@ GuiMain (VOID)
 - 仅 X64、单线程（`LV_OS_NONE`）、仅 DXE 阶段——移植层消费 `gBS`/`AllocatePool`。
 - `PixelBitMask` GOP 模式（变位宽通道，如 30bit HDR）被拒绝——渲染契约固定为 `BGRX8888`。
 - `SimpleTextIn` 兜底路径：基本按键可用，但无 Ctrl/Shift 状态（组合键不可用）。
-- `SimplePointer` 兜底路径：只上报按键，光标不移动（v1 不累积相对位移）。
+- `SimplePointer` 兜底路径支持相对移动和左键；右键、滚轮及鼠标加速度尚未映射。
 - 输入设备均为可选外设：初始化失败只告警，不致命。
 
 ## 许可证
@@ -332,7 +332,7 @@ The interesting engineering is in the details, most of which took real debugging
 - **Tick callback must be registered *after* `lv_init()`.** `lv_global_init()` memzeros all LVGL global state including the tick callback; registering earlier gets silently wiped and the tick freezes at 0. A TSC-based source is used because every `TimerLib` instance available to DXE applications is broken in this scenario (null template, never-started APIC timer, or a 24-bit PM timer that wraps every ~4.7 s).
 - **Press/release edge synthesis.** `ReadKeyStroke(Ex)` only reports presses; LVGL's keypad indev only dispatches a key on the *rising* edge (`PRESSED` after `RELEASED`). Two consecutive presses without a release would be treated as one long keypress — fast typing would silently drop keys. The driver synthesizes a matching `RELEASED` before consuming the next key.
 - **`SimpleTextInEx` for modifiers.** The extended protocol's `KeyShiftState` is the only way to read Ctrl/Shift in UEFI; the fallback path works but reports no modifiers (a `DEBUG_WARN` tells you when).
-- **AbsolutePointer first.** Relative `SimplePointer` has no reliable absolute position, so absolute devices are preferred with a linear `CurrentX × width / MaxX` mapping. The ConSplitter's virtual aggregator is skipped by preferring handles that carry a device path — virtual handles accept the protocol but never return input.
+- **Real AbsolutePointer first.** Absolute devices use a linear `CurrentX × width / MaxX` mapping; `SimplePointer` starts at screen center, accumulates relative motion using `max(1, Resolution / 16)` counts per pixel with subpixel remainders, and clamps the result to the display. Selection follows real Absolute → real Simple → fallback Absolute → fallback Simple, so a ConSplitter virtual Absolute handle cannot mask a real relative device (real devices carry a device path; virtual aggregators do not).
 - **`realloc` over a pool.** UEFI pools have no `realloc`; an 8-byte size header in front of every block emulates it (`alloc → copy → free`). A self-test covering the `NULL`-realloc, grow and shrink paths runs at every init and aborts init if the allocator is broken.
 
 ## Configuration
@@ -360,7 +360,7 @@ The file carries UTF-8 CJK comments on purpose; the `LvglLib.inf` build options 
 - X64 only, single-threaded (`LV_OS_NONE`), DXE phase only — the port consumes `gBS`/`AllocatePool`.
 - `PixelBitMask` GOP modes (variable-width channels, e.g. 30-bit HDR) are rejected — the render contract is fixed `BGRX8888`.
 - `SimpleTextIn` fallback: basic keys work, but no Ctrl/Shift state (combos unavailable).
-- `SimplePointer` fallback: buttons only; the cursor does not move (relative motion is not accumulated in v1).
+- `SimplePointer` fallback supports relative motion and the left button; right-click, wheel, and pointer acceleration are not mapped yet.
 - Input devices are optional: their init failures are warnings, not fatal errors.
 
 ## License
