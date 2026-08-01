@@ -50,6 +50,10 @@ LvglPortDeinit (
 /// does not intercept them and the focused widget handles paging itself.
 #define LVGL_KEY_PAGE_UP    0x10000001U
 #define LVGL_KEY_PAGE_DOWN  0x10000002U
+/// Task 7: F 键无原生 LV_KEY_* 常量，SCAN_F2 映射为本自定义值，由 Ui 层
+/// ScrKeyCb 识别为"重命名"（Task 4 起预留的 F2=重命名入口，Task 9 键盘
+/// 全表将补全 F1/F5 等）。
+#define LVGL_KEY_F2         0x10000003U
 
 /// Current keyboard modifier state as LVGL_KBD_MOD_* bits, refreshed on
 /// every key event read via SimpleTextInEx. The Ui layer uses this to

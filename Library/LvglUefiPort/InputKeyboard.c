@@ -86,7 +86,8 @@ UpdateModifiers (
   扫描码优先（方向/HOME/END/PAGE/DELETE/ESC 等功能键 UnicodeChar 为 0），
   其次控制字符 \r、\b，然后 0x20..0x7E 可打印 ASCII 原样透传（Shift 的
   大小写效果已体现在 UnicodeChar 里），最后 Ctrl+字母 控制码还原。
-  F 键、INS、Tab 等不映射。
+  F 键、INS、Tab 等不映射（Task 7 起 SCAN_F2 例外：映射为自定义
+  LVGL_KEY_F2 供重命名快捷键，其余 F 键与 INS/Tab 待 Task 9 键盘全表）。
   PgUp/PgDn 不映射为 LV_KEY_PREV/NEXT：LVGL group 会把这两个值永久拦截
   做焦点导航（lv_group_send_data），焦点控件永远收不到；映射为自定义
   值 LVGL_KEY_PAGE_UP/DOWN 后 group 不拦截，直达焦点控件自行翻页（M4）。
@@ -122,6 +123,7 @@ MapEfiKeyToLv (
       case SCAN_PAGE_DOWN: return LVGL_KEY_PAGE_DOWN;
       case SCAN_DELETE:    return LV_KEY_DEL;
       case SCAN_ESC:       return LV_KEY_ESC;
+      case SCAN_F2:        return LVGL_KEY_F2;   /* Task 7：重命名入口（自定义键值，group 不拦截） */
       default:             return 0;
     }
   }
