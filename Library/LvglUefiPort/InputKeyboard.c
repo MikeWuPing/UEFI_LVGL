@@ -84,17 +84,30 @@ UpdateModifiers (
 /**
   EFI_INPUT_KEY → LVGL 键值映射。
   扫描码优先（方向/HOME/END/PAGE/DELETE/ESC 等功能键 UnicodeChar 为 0），
-  其次控制字符 \r、\b，最后 0x20..0x7E 可打印 ASCII 原样透传（Shift 的
-  大小写效果已体现在 UnicodeChar 里）。F 键、INS、Tab 等不映射。
+  其次控制字符 \r、\b，然后 0x20..0x7E 可打印 ASCII 原样透传（Shift 的
+  大小写效果已体现在 UnicodeChar 里），最后 Ctrl+字母 控制码还原。
+  F 键、INS、Tab 等不映射。
   PgUp/PgDn 不映射为 LV_KEY_PREV/NEXT：LVGL group 会把这两个值永久拦截
   做焦点导航（lv_group_send_data），焦点控件永远收不到；映射为自定义
   值 LVGL_KEY_PAGE_UP/DOWN 后 group 不拦截，直达焦点控件自行翻页（M4）。
+
+  Ctrl 组合键：OVMF 的 PS/2 键盘把 Ctrl+字母 上报为 ASCII 控制码
+  （Ctrl+C=0x03、Ctrl+V=0x16、Ctrl+A=0x01、Ctrl+N=0x0E，ScanCode 为
+  SCAN_NULL）。直接透传会撞上 LVGL 自定义键值（LV_KEY_HOME=2、
+  LV_KEY_END=3），被 LVGL 当导航键拦截；丢弃则应用收不到 Ctrl 快捷键。
+  这里在 KeyShiftState 的 Ctrl 修饰位有效时把控制码 +0x40 还原为字母
+  （0x03→'C'…），走正常按键路径，让上层靠 LvglKbdGetModifiers() 区分。
+  \r（回车）、\b（退格）、\t 保持各自映射，不做还原。
+  @param  Key            固件按键（ScanCode + UnicodeChar）
+  @param  KeyShiftState  EFI_KEY_STATE.KeyShiftState（SimpleTextIn 兜底
+                         路径下为 0，Ctrl 还原不生效）
   @retval 0  不可映射（调用方应跳过该键继续排空队列）
 **/
 static
 UINT32
 MapEfiKeyToLv (
-  IN CONST EFI_INPUT_KEY  *Key
+  IN CONST EFI_INPUT_KEY  *Key,
+  IN UINT32               KeyShiftState
   )
 {
   if (Key->ScanCode != SCAN_NULL) {
@@ -125,6 +138,14 @@ MapEfiKeyToLv (
     return (UINT32)Key->UnicodeChar;
   }
 
+  /* Ctrl+字母 控制码还原（0x00..0x1A，\r/\b/\t 已在上文映射/排除） */
+  if ((KeyShiftState & EFI_SHIFT_STATE_VALID) != 0 &&
+      (KeyShiftState & (EFI_LEFT_CONTROL_PRESSED | EFI_RIGHT_CONTROL_PRESSED)) != 0 &&
+      (Key->UnicodeChar <= 0x1A) &&
+      (Key->UnicodeChar != L'\t')) {
+    return (UINT32)(Key->UnicodeChar + 0x40);
+  }
+
   return 0;
 }
 
@@ -143,6 +164,7 @@ KbdReadCb (
 {
   EFI_STATUS   Status;
   EFI_KEY_DATA KeyData;
+  UINT32       KeyShiftState = 0;  // SimpleTextIn 兜底路径无此字段，恒 0
   UINT32       LvKey;
 
   //
@@ -172,6 +194,7 @@ KbdReadCb (
       Status = mTxtEx->ReadKeyStrokeEx (mTxtEx, &KeyData);
       if (!EFI_ERROR (Status)) {
         UpdateModifiers (KeyData.KeyState.KeyShiftState);
+        KeyShiftState = KeyData.KeyState.KeyShiftState;
       }
     } else {
       Status = mTxtIn->ReadKeyStroke (mTxtIn, &KeyData.Key);
@@ -184,7 +207,7 @@ KbdReadCb (
       return;
     }
 
-    LvKey = MapEfiKeyToLv (&KeyData.Key);
+    LvKey = MapEfiKeyToLv (&KeyData.Key, KeyShiftState);
     if (LvKey != 0) {
       break;
     }
