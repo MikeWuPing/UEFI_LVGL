@@ -3,7 +3,7 @@
 # InputKeyboard.c: SimpleTextInEx (preferred, reports Ctrl/Shift modifiers
 # via LvglKbdGetModifiers) with SimpleTextIn fallback. InputMouse.c:
 # AbsolutePointer (preferred, absolute coordinate mapping) with
-# SimplePointer fallback (buttons only, relative motion not accumulated).
+# SimplePointer fallback (relative motion scaled, accumulated, and clamped).
 #
 # NOTE: keep this file pure ASCII - BaseTools reads meta files with the
 # OS locale encoding (cp936 here), non-ASCII bytes can break the parser.

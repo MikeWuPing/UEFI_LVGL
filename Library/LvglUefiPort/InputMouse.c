@@ -5,13 +5,14 @@
   协议选择
   --------
   优先 AbsolutePointer：绝对坐标可直接线性映射到屏幕像素，是图形界面
-  可用的唯一现实路径（QEMU usb-mouse 经 OVMF 的 UsbMouseAbsolutePointerDxe
+  最直接的输入路径（QEMU usb-mouse 经 OVMF 的 UsbMouseAbsolutePointerDxe
   绑定后走这条：boot 协议相对鼠标被该驱动适配成 0..1024 绝对窗口，初始
   居中；不要用 usb-tablet，OVMF 没有它的驱动——IsUsbMouse 只认
   subclass=1/protocol=2 的 boot mouse，平板是 0/0）。拿不到时退回
-  SimplePointer 并打 DEBUG_WARN——相对位移模式 v1 只上报按键状态，光标
-  不移动（已知限制，见 MouseReadCb 相对分支注释），仅保证固件无绝对
-  指针时按键事件不丢。
+  SimplePointer 并打 DEBUG_WARN。相对位移按设备 Mode->ResolutionX/Y
+  缩放为像素增量，从屏幕中心开始累加并钳制在 GOP 边界内；缩放比例沿用
+  QurOKR 已验证的 Resolution/16 counts-per-pixel，并保留亚像素余数，避免
+  高分辨率设备的连续小位移因逐次舍入而永久丢失。
 
   多实例加固（M4）：固件里同一指针协议可能有多个实例——ConSplitter 的
   虚拟聚合实例与真实 USB 鼠标的子句柄实例并存。虚拟实例表面"协议存在"
@@ -19,9 +20,10 @@
   GetState 恒 EFI_NOT_READY），而 LocateProtocol 只返回固件找到的第一个
   实例，可能误中虚拟实例。OpenBestPointerInstance 因此遍历全部句柄，
   优先打开带 DevicePath 的实例：真实设备子句柄按 UEFI 驱动模型必有
-  设备路径，ConSplitter 的虚拟句柄不是设备、没有设备路径。全无设备
-  路径时退回句柄 0 并打 DEBUG_WARN；init 日志打印选中来源
-  （device-path / fallback-handle0）供串口取证核对。
+  设备路径，ConSplitter 的虚拟句柄不是设备、没有设备路径。MouseInit
+  同时探测两种协议并按“真实 Absolute、真实 Simple、fallback Absolute、
+  fallback Simple”选择，避免虚拟 Absolute 抢占真实 Simple；init 日志打印
+  选中来源（device-path / fallback-handle0）供串口取证核对。
 
   坐标映射与按键语义
   ------------------
@@ -36,8 +38,8 @@
 
   GetState 语义：两种协议的 GetState 在状态自上次调用起未变化时都返回
   EFI_NOT_READY（UEFI 规范），因此按键状态缓存于 mPressed，NOT_READY 与
-  DEVICE_ERROR 时沿用缓存只刷新 state；坐标则由 LVGL 在进入回调前预填
-  上次值（lv_indev.c indev_read_core），无需本驱动重复缓存。
+  DEVICE_ERROR 时沿用缓存。绝对坐标由 LVGL 在进入回调前预填上次值；相对
+  坐标必须由本驱动持久化，才能把后续 delta 积分为绝对屏幕坐标。
 **/
 
 #include <Library/LvglLib.h>
@@ -61,6 +63,88 @@ static EFI_ABSOLUTE_POINTER_PROTOCOL  *mAbs;      ///< 首选：绝对坐标
 static EFI_SIMPLE_POINTER_PROTOCOL    *mSimple;   ///< 兜底：相对位移
 static lv_indev_t                     *mIndev;
 static BOOLEAN                        mPressed;   ///< 缓存的按键状态
+static INT32                          mSimpleX;   ///< 相对模式累计后的屏幕坐标
+static INT32                          mSimpleY;
+static INT64                          mSimpleRemainderX; ///< 未满一个像素的设备 counts
+static INT64                          mSimpleRemainderY;
+
+typedef enum {
+  PointerSourceNone,
+  PointerSourceDevicePath,
+  PointerSourceFallbackHandle0
+} POINTER_SOURCE;
+
+/** 返回协议实例来源的日志字符串。 */
+static
+CONST CHAR8 *
+PointerSourceName (
+  IN POINTER_SOURCE  Source
+  )
+{
+  switch (Source) {
+    case PointerSourceDevicePath:
+      return "device-path";
+    case PointerSourceFallbackHandle0:
+      return "fallback-handle0";
+    default:
+      return "none";
+  }
+}
+
+/**
+  把 SimplePointer 的设备 counts 换算成像素增量，并跨读回调保留余数。
+
+  QurOKR 在 QEMU/OVMF 上验证的比例为 Resolution/16 counts-per-pixel；EDK2
+  UsbMouseDxe/Ps2MouseDxe 的 Resolution 分别为 8/4，故两者均退化为原始
+  count 一像素。Resolution==0 按 UEFI 规范表示该轴不存在。
+**/
+static
+INT32
+ScaleSimplePointerDelta (
+  IN     INT32   Delta,
+  IN     UINT64  Resolution,
+  IN OUT INT64   *Remainder
+  )
+{
+  INT64  CountsPerPixel;
+  INT64  Total;
+
+  if (Resolution == 0) {
+    *Remainder = 0;
+    return 0;
+  }
+
+  CountsPerPixel = (INT64)(Resolution / 16U);
+  if (CountsPerPixel <= 0) {
+    CountsPerPixel = 1;
+  }
+
+  Total      = *Remainder + (INT64)Delta;
+  *Remainder = Total % CountsPerPixel;
+  return (INT32)(Total / CountsPerPixel);
+}
+
+/** 把相对模式的累计坐标钳制到单轴有效像素范围。 */
+static
+INT32
+ClampSimplePointerCoordinate (
+  IN INT64   Value,
+  IN UINT32  Size
+  )
+{
+  INT64  Maximum;
+
+  if ((Size == 0) || (Value <= 0)) {
+    return 0;
+  }
+
+  Maximum = (INT64)Size - 1;
+  if (Value >= Maximum) {
+    return (INT32)Maximum;
+  }
+
+  return (INT32)Value;
+}
 
 /**
   LVGL indev 读回调。按 mAbs/mSimple 哪个非空走绝对/相对分支。
@@ -136,18 +220,47 @@ MouseReadCb (
     //
   } else {
     EFI_SIMPLE_POINTER_STATE  State;
+    UINT32                    Width;
+    UINT32                    Height;
+    INT32                     DeltaX;
+    INT32                     DeltaY;
 
     Status = mSimple->GetState (mSimple, &State);
     if (!EFI_ERROR (Status)) {
       mPressed = State.LeftButton;
-      //
-      // 已知限制（v1）：RelativeMovementX/Y 不累加进光标坐标，光标停在
-      // 原点，只上报按键状态。相对位移累加需要按 Mode->ResolutionX/Y
-      // （counts/mm）换算像素增量并做屏幕边界钳制，留待后续版本。
-      // QEMU usb-mouse 在 OVMF 下走绝对模式（见文件头），相对路径仅为
-      // 兜底，v1 不值得投入。
-      //
+      GopDisplayGetResolution (&Width, &Height);
+
+      DeltaX = ScaleSimplePointerDelta (
+                 State.RelativeMovementX,
+                 mSimple->Mode->ResolutionX,
+                 &mSimpleRemainderX
+                 );
+      DeltaY = ScaleSimplePointerDelta (
+                 State.RelativeMovementY,
+                 mSimple->Mode->ResolutionY,
+                 &mSimpleRemainderY
+                 );
+
+      mSimpleX = ClampSimplePointerCoordinate ((INT64)mSimpleX + DeltaX, Width);
+      mSimpleY = ClampSimplePointerCoordinate ((INT64)mSimpleY + DeltaY, Height);
+
+      DEBUG ((
+        DEBUG_VERBOSE,
+        "[LvglPort] rel dx=%d dy=%d point=%d,%d left=%u\n",
+        State.RelativeMovementX,
+        State.RelativeMovementY,
+        mSimpleX,
+        mSimpleY,
+        State.LeftButton ? 1U : 0U
+        ));
     }
+
+    //
+    // 首次读即从屏幕中心上报；NOT_READY/DEVICE_ERROR 沿用累计坐标与按键
+    // 缓存，不依赖 LVGL 内部 last_raw_point 的初始值。
+    //
+    Data->point.x = mSimpleX;
+    Data->point.y = mSimpleY;
   }
 
   Data->state             = mPressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
@@ -162,26 +275,24 @@ MouseReadCb (
   打开带 DevicePath 的实例——真实 USB 鼠标经 UsbMouseAbsolutePointerDxe
   绑定到带设备路径的子句柄，而 ConSplitter 的虚拟聚合句柄不是设备、
   没有设备路径，据此绕开"协议存在但恒读不到输入"的虚拟实例。所有实例
-  都无设备路径时退回句柄 0（保持单实例/全虚拟场景的原行为）并打
-  DEBUG_WARN。
+  都无设备路径时退回句柄 0（保持单实例/全虚拟场景的原行为）。最终若
+  选中 fallback 实例，MouseInit 统一打 DEBUG_WARN。
 
   GET_PROTOCOL 属性下 AgentHandle/ControllerHandle 按 UEFI 规范可传
   NULL：本驱动只读接口，不向驱动模型声明消费关系。
 
   @param[in]  ProtocolGuid  要定位的指针协议 GUID
-  @param[in]  ProtocolName  协议名（fallback 告警日志用，ASCII）
   @param[out] Interface     打开的协议实例；失败时为 NULL
-  @param[out] Source        选中来源："device-path" / "fallback-handle0"
+  @param[out] Source        选中来源枚举
   @retval EFI_SUCCESS    成功打开某实例
   @retval EFI_NOT_FOUND  没有任何句柄安装该协议，或全部打开失败
 **/
 static
 EFI_STATUS
 OpenBestPointerInstance (
-  IN  EFI_GUID     *ProtocolGuid,
-  IN  CONST CHAR8  *ProtocolName,
-  OUT VOID         **Interface,
-  OUT CONST CHAR8  **Source
+  IN  EFI_GUID       *ProtocolGuid,
+  OUT VOID           **Interface,
+  OUT POINTER_SOURCE *Source
   )
 {
   EFI_STATUS  Status;
@@ -190,7 +301,7 @@ OpenBestPointerInstance (
   UINTN       Index;
 
   *Interface = NULL;
-  *Source    = NULL;
+  *Source    = PointerSourceNone;
 
   Status = gBS->LocateHandleBuffer (
                   ByProtocol,
@@ -234,7 +345,7 @@ OpenBestPointerInstance (
                     EFI_OPEN_PROTOCOL_GET_PROTOCOL
                     );
     if (!EFI_ERROR (Status)) {
-      *Source = "device-path";
+      *Source = PointerSourceDevicePath;
       break;
     }
   }
@@ -255,14 +366,7 @@ OpenBestPointerInstance (
                     EFI_OPEN_PROTOCOL_GET_PROTOCOL
                     );
     if (!EFI_ERROR (Status)) {
-      *Source = "fallback-handle0";
-      DEBUG ((
-        DEBUG_WARN,
-        "[LvglPort] %a: no device-path instance among %u handles, "
-        "fallback to handle0 (ConSplitter virtual instance possible)\n",
-        ProtocolName,
-        (UINT32)HandleCount
-        ));
+      *Source = PointerSourceFallbackHandle0;
     }
   }
 
@@ -281,46 +385,97 @@ MouseInit (
   VOID
   )
 {
-  EFI_STATUS   Status;
-  CONST CHAR8  *AbsSource;
-  CONST CHAR8  *SimpleSource;
+  EFI_ABSOLUTE_POINTER_PROTOCOL  *AbsCandidate;
+  EFI_SIMPLE_POINTER_PROTOCOL    *SimpleCandidate;
+  POINTER_SOURCE                 AbsSource;
+  POINTER_SOURCE                 SimpleSource;
+  POINTER_SOURCE                 SelectedSource;
+  UINT32                         Width;
+  UINT32                         Height;
 
-  AbsSource    = NULL;
-  SimpleSource = NULL;
+  AbsCandidate    = NULL;
+  SimpleCandidate = NULL;
+  AbsSource       = PointerSourceNone;
+  SimpleSource    = PointerSourceNone;
+  SelectedSource  = PointerSourceNone;
 
-  Status = OpenBestPointerInstance (
-             &gEfiAbsolutePointerProtocolGuid,
-             "AbsolutePointer",
-             (VOID **)&mAbs,
-             &AbsSource
-             );
-  if (!EFI_ERROR (Status) && (mAbs->Mode == NULL)) {
+  OpenBestPointerInstance (
+    &gEfiAbsolutePointerProtocolGuid,
+    (VOID **)&AbsCandidate,
+    &AbsSource
+    );
+  if ((AbsCandidate != NULL) && (AbsCandidate->Mode == NULL)) {
     //
     // 规范保证协议带 Mode 指针；异常固件下防御性判空，拿不到 Mode 的
     // "绝对指针"无法做坐标映射，按没有绝对指针处理，继续走兜底。
     //
     DEBUG ((DEBUG_WARN, "[LvglPort] AbsolutePointer with NULL Mode, ignored\n"));
-    mAbs = NULL;
+    AbsCandidate = NULL;
+    AbsSource    = PointerSourceNone;
   }
 
-  if (mAbs == NULL) {
-    Status = OpenBestPointerInstance (
-               &gEfiSimplePointerProtocolGuid,
-               "SimplePointer",
-               (VOID **)&mSimple,
-               &SimpleSource
-               );
-    if (EFI_ERROR (Status)) {
-      mSimple = NULL;
-      DEBUG ((DEBUG_WARN, "[LvglPort] no pointer protocol found: %r\n", Status));
-      return EFI_UNSUPPORTED;
-    }
+  OpenBestPointerInstance (
+    &gEfiSimplePointerProtocolGuid,
+    (VOID **)&SimpleCandidate,
+    &SimpleSource
+    );
+  if ((SimpleCandidate != NULL) && (SimpleCandidate->Mode == NULL)) {
+    DEBUG ((DEBUG_WARN, "[LvglPort] SimplePointer with NULL Mode, ignored\n"));
+    SimpleCandidate = NULL;
+    SimpleSource    = PointerSourceNone;
+  }
+
+  //
+  // 跨协议选择：真实绝对设备优先；若只有 ConSplitter 虚拟 Absolute，
+  // 必须让带 DevicePath 的真实 SimplePointer 胜出，否则相对路径不可达。
+  // 两类协议都只有虚拟聚合实例时保持原先的 Absolute 优先策略。
+  //
+  if ((AbsCandidate != NULL) && (AbsSource == PointerSourceDevicePath)) {
+    mAbs           = AbsCandidate;
+    SelectedSource = AbsSource;
+  } else if ((SimpleCandidate != NULL) && (SimpleSource == PointerSourceDevicePath)) {
+    mSimple        = SimpleCandidate;
+    SelectedSource = SimpleSource;
+  } else if (AbsCandidate != NULL) {
+    mAbs           = AbsCandidate;
+    SelectedSource = AbsSource;
+  } else if (SimpleCandidate != NULL) {
+    mSimple        = SimpleCandidate;
+    SelectedSource = SimpleSource;
+  } else {
+    DEBUG ((DEBUG_WARN, "[LvglPort] no pointer protocol found\n"));
+    return EFI_UNSUPPORTED;
+  }
+
+  if (SelectedSource == PointerSourceFallbackHandle0) {
+    DEBUG ((
+      DEBUG_WARN,
+      "[LvglPort] selected pointer has no device path "
+      "(ConSplitter virtual instance possible)\n"
+      ));
+  }
+
+  if (mSimple != NULL) {
+    GopDisplayGetResolution (&Width, &Height);
+    mSimpleX          = (INT32)(Width / 2U);
+    mSimpleY          = (INT32)(Height / 2U);
+    mSimpleRemainderX = 0;
+    mSimpleRemainderY = 0;
 
     DEBUG ((
       DEBUG_WARN,
       "[LvglPort] AbsolutePointer unavailable, fallback to SimplePointer: "
-      "relative mode reports buttons only, cursor fixed (v1 limitation)\n"
+      "relative motion enabled\n"
       ));
+
+    if ((mSimple->Mode->ResolutionX == 0) &&
+        (mSimple->Mode->ResolutionY == 0))
+    {
+      DEBUG ((
+        DEBUG_WARN,
+        "[LvglPort] SimplePointer has no X/Y axis; buttons only\n"
+        ));
+    }
   }
 
   mIndev = lv_indev_create ();
@@ -341,15 +496,17 @@ MouseInit (
     DEBUG ((
       DEBUG_INFO,
       "[LvglPort] pointer: AbsolutePointer (%a) max=%ux%u\n",
-      AbsSource,
+      PointerSourceName (SelectedSource),
       (UINT32)mAbs->Mode->AbsoluteMaxX,
       (UINT32)mAbs->Mode->AbsoluteMaxY
       ));
   } else {
     DEBUG ((
       DEBUG_INFO,
-      "[LvglPort] pointer: SimplePointer fallback (%a)\n",
-      SimpleSource
+      "[LvglPort] pointer: SimplePointer fallback (%a) res=%ux%u\n",
+      PointerSourceName (SelectedSource),
+      (UINT32)mSimple->Mode->ResolutionX,
+      (UINT32)mSimple->Mode->ResolutionY
       ));
   }
 
@@ -399,4 +556,8 @@ MouseDeinit (
   mAbs     = NULL;
   mSimple  = NULL;
   mPressed = FALSE;
+  mSimpleX = 0;
+  mSimpleY = 0;
+  mSimpleRemainderX = 0;
+  mSimpleRemainderY = 0;
 }
