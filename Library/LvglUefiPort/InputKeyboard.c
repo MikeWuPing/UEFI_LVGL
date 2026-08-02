@@ -86,8 +86,11 @@ UpdateModifiers (
   扫描码优先（方向/HOME/END/PAGE/DELETE/ESC 等功能键 UnicodeChar 为 0），
   其次控制字符 \r、\b，然后 0x20..0x7E 可打印 ASCII 原样透传（Shift 的
   大小写效果已体现在 UnicodeChar 里），最后 Ctrl+字母 控制码还原。
-  F 键、INS、Tab 等不映射（Task 7 起 SCAN_F2 例外：映射为自定义
-  LVGL_KEY_F2 供重命名快捷键，其余 F 键与 INS/Tab 待 Task 9 键盘全表）。
+  F 键与 Tab 的映射（Task 9 键盘全表）：Tab 以 UnicodeChar=0x09 上报
+  （UEFI 无 SCAN_TAB）→ LV_KEY_NEXT（组焦点前移，见下）；SCAN_F2/F1/F5
+  → 自定义 LVGL_KEY_F1/F2/F5（无原生 LV_KEY_* 常量，自定义值 group
+  不拦截，由屏幕 ScrKeyCb 分发为重命名/关于/刷新）。INS、F3/F4/F6-F12
+  仍不映射。
   PgUp/PgDn 不映射为 LV_KEY_PREV/NEXT：LVGL group 会把这两个值永久拦截
   做焦点导航（lv_group_send_data），焦点控件永远收不到；映射为自定义
   值 LVGL_KEY_PAGE_UP/DOWN 后 group 不拦截，直达焦点控件自行翻页（M4）。
@@ -124,6 +127,8 @@ MapEfiKeyToLv (
       case SCAN_DELETE:    return LV_KEY_DEL;
       case SCAN_ESC:       return LV_KEY_ESC;
       case SCAN_F2:        return LVGL_KEY_F2;   /* Task 7：重命名入口（自定义键值，group 不拦截） */
+      case SCAN_F1:        return LVGL_KEY_F1;   /* Task 9：关于框（自定义键值，group 不拦截） */
+      case SCAN_F5:        return LVGL_KEY_F5;   /* Task 9：刷新（自定义键值，group 不拦截） */
       default:             return 0;
     }
   }
@@ -134,6 +139,17 @@ MapEfiKeyToLv (
 
   if (Key->UnicodeChar == L'\b') {
     return LV_KEY_BACKSPACE;
+  }
+
+  /* Task 9 键盘全表：Tab = 组焦点导航前移。UEFI 无 SCAN_TAB 扫描码——
+     Tab 以 UnicodeChar=0x09（SCAN_NULL）上报，与 \r/\b 同走控制字符
+     路径。LVGL 惯例 Tab=下一项、Shift+Tab=上一项，但 OVMF PS/2 不报
+     Shift 修饰位（Task 7 实测，KeyShiftState 恒无 SHIFT）——仅映射
+     NEXT 一个方向。lv_indev 把 LV_KEY_NEXT 拦截做 lv_group_focus_next
+     （lv_indev.c keypad 分支），不发给焦点控件，组内对象（树行/列表
+     行/对话框按钮）按创建序循环。 */
+  if (Key->UnicodeChar == L'\t') {
+    return LV_KEY_NEXT;
   }
 
   if ((Key->UnicodeChar >= 0x20) && (Key->UnicodeChar <= 0x7E)) {
@@ -230,6 +246,7 @@ KbdReadCb (
   @retval EFI_UNSUPPORTED       两条协议路径都拿不到（无控制台输入）
   @retval EFI_OUT_OF_RESOURCES  LVGL 组或 indev 创建失败
 **/
+
 EFI_STATUS
 KeyboardInit (
   VOID

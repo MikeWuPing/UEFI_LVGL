@@ -51,9 +51,14 @@ LvglPortDeinit (
 #define LVGL_KEY_PAGE_UP    0x10000001U
 #define LVGL_KEY_PAGE_DOWN  0x10000002U
 /// Task 7: F 键无原生 LV_KEY_* 常量，SCAN_F2 映射为本自定义值，由 Ui 层
-/// ScrKeyCb 识别为"重命名"（Task 4 起预留的 F2=重命名入口，Task 9 键盘
-/// 全表将补全 F1/F5 等）。
+/// ScrKeyCb 识别为"重命名"（Task 4 起预留的 F2=重命名入口）。
+/// Task 9 键盘全表：F1=关于 / F5=刷新 同模式（端口 SCAN_F1/SCAN_F5 →
+/// 本自定义值，group 不拦截，直达屏幕 ScrKeyCb）。取值自 0x10000004 顺延
+/// 于 LVGL_KEY_F2=0x10000003（Task 9 任务书误写 F1/F5 为 0x10000003/4，
+/// 与 F2 冲突，按序顺延——自定义值仅要求组内唯一）。
 #define LVGL_KEY_F2         0x10000003U
+#define LVGL_KEY_F1         0x10000004U
+#define LVGL_KEY_F5         0x10000005U
 
 /// Current keyboard modifier state as LVGL_KBD_MOD_* bits, refreshed on
 /// every key event read via SimpleTextInEx. The Ui layer uses this to
