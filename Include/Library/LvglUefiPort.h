@@ -59,6 +59,10 @@ LvglPortDeinit (
 #define LVGL_KEY_F2         0x10000003U
 #define LVGL_KEY_F1         0x10000004U
 #define LVGL_KEY_F5         0x10000005U
+/// Task 10: Tab 从 LV_KEY_NEXT 改为自定义值——区域切换语义（列表↔树↔
+/// 工具栏）改由 Ui 层 ScrKeyCb 分发，LVGL group 不再拦截 Tab 做组内
+/// 焦点导航。取值 0x10000006 顺延于 F5（自定义值仅要求组内唯一）。
+#define LVGL_KEY_TAB        0x10000006U
 
 /// Current keyboard modifier state as LVGL_KBD_MOD_* bits, refreshed on
 /// every key event read via SimpleTextInEx. The Ui layer uses this to

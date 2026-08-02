@@ -86,8 +86,8 @@ UpdateModifiers (
   扫描码优先（方向/HOME/END/PAGE/DELETE/ESC 等功能键 UnicodeChar 为 0），
   其次控制字符 \r、\b，然后 0x20..0x7E 可打印 ASCII 原样透传（Shift 的
   大小写效果已体现在 UnicodeChar 里），最后 Ctrl+字母 控制码还原。
-  F 键与 Tab 的映射（Task 9 键盘全表）：Tab 以 UnicodeChar=0x09 上报
-  （UEFI 无 SCAN_TAB）→ LV_KEY_NEXT（组焦点前移，见下）；SCAN_F2/F1/F5
+  F 键与 Tab 的映射：Tab 以 UnicodeChar=0x09 上报（UEFI 无 SCAN_TAB）
+  → 自定义 LVGL_KEY_TAB（Task 10 区域切换语义，见下）；SCAN_F2/F1/F5
   → 自定义 LVGL_KEY_F1/F2/F5（无原生 LV_KEY_* 常量，自定义值 group
   不拦截，由屏幕 ScrKeyCb 分发为重命名/关于/刷新）。INS、F3/F4/F6-F12
   仍不映射。
@@ -141,15 +141,15 @@ MapEfiKeyToLv (
     return LV_KEY_BACKSPACE;
   }
 
-  /* Task 9 键盘全表：Tab = 组焦点导航前移。UEFI 无 SCAN_TAB 扫描码——
-     Tab 以 UnicodeChar=0x09（SCAN_NULL）上报，与 \r/\b 同走控制字符
-     路径。LVGL 惯例 Tab=下一项、Shift+Tab=上一项，但 OVMF PS/2 不报
-     Shift 修饰位（Task 7 实测，KeyShiftState 恒无 SHIFT）——仅映射
-     NEXT 一个方向。lv_indev 把 LV_KEY_NEXT 拦截做 lv_group_focus_next
-     （lv_indev.c keypad 分支），不发给焦点控件，组内对象（树行/列表
-     行/对话框按钮）按创建序循环。 */
+  /* Task 10：Tab = 自定义 LVGL_KEY_TAB（区域切换语义）。UEFI 无
+     SCAN_TAB 扫描码——Tab 以 UnicodeChar=0x09（SCAN_NULL）上报，与
+     \r/\b 同走控制字符路径。Task 9a 曾映射为 LV_KEY_NEXT（LVGL 惯例
+     Tab=组焦点前移），但组内导航在分区制下无意义且会与对话框焦点篱笆
+     冲突——现改映射为自定义值：lv_indev 不拦截（非 NEXT/PREV），以
+     KEY 事件发给焦点对象并冒泡到屏幕 ScrKeyCb，由 Ui 层 GuTabNext
+     做列表↔树↔工具栏的区域切换。 */
   if (Key->UnicodeChar == L'\t') {
-    return LV_KEY_NEXT;
+    return LVGL_KEY_TAB;
   }
 
   if ((Key->UnicodeChar >= 0x20) && (Key->UnicodeChar <= 0x7E)) {
