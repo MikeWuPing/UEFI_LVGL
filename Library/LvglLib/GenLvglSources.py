@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""扫描 lvgl/src 下全部 .c，生成 LvglLib.inf。
+"""扫描 lvgl/src 下全部 .c 与 Fonts/ 目录，生成 LvglLib.inf。
 
 镜像（lvgl/ 目录）为官方 PRISTINE 源码，一律不手工在 INF 里列文件；
 更换 LVGL 版本后重跑本脚本即可重新生成 [Sources]。
+
+字体文件特殊处理：lvgl/src/font/ 下的 lv_font_simsun_*.c 是上游镜像自带的
+原版字体，本项目在 Fonts/ 目录维护重生成版本（补简体字形，见
+Fonts/lv_font_simsun_16_cjk.c 头部注释），编译只取 Fonts/ 版本——
+脚本跳过镜像内的 simsun 字体，避免重复符号。
 注意：src 下的 .cpp（ThorVG 等）不在收集范围——当前 lv_conf.h
 未启用任何 C++ 组件，LV_USE_THORVG_INTERNAL=0。
 """
@@ -11,6 +16,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, "lvgl", "src")
+FONTS = os.path.join(ROOT, "Fonts")
 
 # LvglLib.inf 的 FILE_GUID，首次生成后固定，重跑脚本保持不变
 FILE_GUID = "1533DFC6-4530-4585-BAF7-7B50B82AD567"
@@ -19,9 +25,15 @@ sources = []
 for dirpath, _dirs, files in os.walk(SRC):
     _dirs.sort()  # 遍历顺序不依赖文件系统枚举顺序，保证 [Sources] 可重现
     for f in sorted(files):
-        if f.endswith(".c"):
-            rel = os.path.relpath(os.path.join(dirpath, f), ROOT).replace(os.sep, "/")
-            sources.append(rel)
+        if not f.endswith(".c"):
+            continue
+        if f.startswith("lv_font_simsun"):
+            continue   # 镜像内原版字体不编译，用 Fonts/ 重生成版
+        rel = os.path.relpath(os.path.join(dirpath, f), ROOT).replace(os.sep, "/")
+        sources.append(rel)
+for f in sorted(os.listdir(FONTS)):
+    if f.endswith(".c"):
+        sources.append("Fonts/" + f)
 
 if not sources:
     sys.exit("error: 未找到 lvgl/src 下的 .c")

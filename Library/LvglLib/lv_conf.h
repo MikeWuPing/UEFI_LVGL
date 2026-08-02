@@ -90,6 +90,12 @@
  *Montserrat 是比例字体，不可用于编辑区。菜单/状态栏仍用 Montserrat。*/
 #define LV_FONT_UNSCII_16 1
 
+/*simsun 简体中文字库（Fonts/ 目录，本包重生成版，见 Fonts/lv_font_simsun_16_cjk.c
+ *头部注释）：ASCII + 常用汉字 + FontAwesome 图标子集。lv_conf_internal.h 默认
+ *关闭（0），此处启用——lv_conf.h 先于 internal 默认值被包含，不会被覆盖。*/
+#define LV_FONT_SIMSUN_14_CJK 1
+#define LV_FONT_SIMSUN_16_CJK 1
+
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 #endif /*LV_CONF_H*/

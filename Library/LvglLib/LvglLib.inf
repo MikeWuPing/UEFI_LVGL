@@ -192,8 +192,6 @@
   lvgl/src/font/lv_font_montserrat_46.c
   lvgl/src/font/lv_font_montserrat_48.c
   lvgl/src/font/lv_font_montserrat_8.c
-  lvgl/src/font/lv_font_simsun_14_cjk.c
-  lvgl/src/font/lv_font_simsun_16_cjk.c
   lvgl/src/font/lv_font_unscii_16.c
   lvgl/src/font/lv_font_unscii_8.c
   lvgl/src/indev/lv_indev.c
@@ -342,6 +340,8 @@
   lvgl/src/widgets/textarea/lv_textarea.c
   lvgl/src/widgets/tileview/lv_tileview.c
   lvgl/src/widgets/win/lv_win.c
+  Fonts/lv_font_simsun_14_cjk.c
+  Fonts/lv_font_simsun_16_cjk.c
 
 [Packages]
   MdePkg/MdePkg.dec
