@@ -18,7 +18,9 @@
   # LvglLib consumes CompilerIntrinsicsLib: MSVC synthesizes memcpy/memset
   # calls for struct copies and fill loops in freestanding builds.
   CompilerIntrinsicsLib|MdePkg/Library/CompilerIntrinsicsLib/CompilerIntrinsicsLib.inf
+  LvglUi|LvglPkg/Library/LvglUi/LvglUi.inf
 
 [Components]
   LvglPkg/Library/LvglLib/LvglLib.inf
   LvglPkg/Library/LvglUefiPort/LvglUefiPort.inf
+  LvglPkg/Library/LvglUi/LvglUi.inf

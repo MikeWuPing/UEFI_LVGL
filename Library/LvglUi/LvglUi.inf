@@ -1,0 +1,23 @@
+## @file
+# Product-neutral LVGL v9 core controls.
+#
+# Keep this metadata file pure ASCII. This BASE library has no UEFI protocol
+# or product-state dependency.
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = LvglUi
+  FILE_GUID                      = 8B5B3A65-88F4-4B7B-BD80-6A2CC4E70D1A
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = LvglUi
+
+[Sources]
+  LvglUiControls.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  LvglPkg/LvglPkg.dec
+
+[LibraryClasses]
+  LvglLib

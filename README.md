@@ -30,6 +30,7 @@
 - **TSC 节拍源**：用一次 100ms `gBS->Stall()` 标定频率；64 位单调计数不回绕，定时器驱动缺失或损坏时照常工作。
 - **自定义内存钩子**：完整的 `lv_mem_*_core()` 函数族基于 `AllocatePool`/`FreePool`，块头 8 字节记录请求尺寸以模拟 `realloc`；每次初始化都跑 `lv_mem_test()` 运行时自检。
 - **1ms 事件泵**（`WaitForEvent` 周期定时器）：派发固件输入驱动赖以填充键队列的 TPL 通知，同时充当主循环节拍。
+- **产品无关核心控件**：`LvglUi` 提供中性主题、Ghost/Primary/Danger 按钮、选择卡和可选择行；默认使用 Montserrat 14，布局采用 flex 与文本换行。
 - **定制 `lv_conf.h`**：32bpp、`LV_STDLIB_CUSTOM` malloc + 内置 string/sprintf（不碰 libc）、`LV_OS_NONE`、33ms 刷新周期（约 30fps）、深色主题、Montserrat 12/14/16 + `unscii_16` 等宽字体、关闭 demo 与日志。
 - **工具链**：MSVC（`/utf-8`，只对上游代码触发的告警做压制）与 GCC 编译选项齐备；仅支持 X64。
 
@@ -38,24 +39,26 @@
 ```
 LvglPkg/
 ├── LvglPkg.dec                     # 包声明（公开头文件、库类）
-├── LvglPkg.dsc                     # 包构建描述（编译两个库）
+├── LvglPkg.dsc                     # 包构建描述（编译三个库）
 ├── Include/Library/
 │   ├── LvglLib.h                   # LVGL 唯一入口头文件 → include 镜像里的 lvgl.h
-│   └── LvglUefiPort.h              # 移植层 API：Init / Poll / Deinit、tick、修饰键、光标
+│   ├── LvglUefiPort.h              # 移植层 API：Init / Poll / Deinit、tick、修饰键、光标
+│   └── LvglUi.h                    # 中性主题与核心复合控件 API
 └── Library/
     ├── LvglLib/
     │   ├── LvglLib.inf             # 由 GenLvglSources.py 生成——切勿手改
     │   ├── lv_conf.h               # LVGL 配置，按 UEFI 环境裁剪（UTF-8，含中文注释）
     │   ├── lvgl/                   # git 子模块 → 上游 lvgl v9.2.2（原版镜像）
     │   └── Fonts/                  # simsun 中文字库（本包重生成版，补简体字形；镜像内原版不编译）
-    └── LvglUefiPort/
-        ├── LvglUefiPort.inf        # UEFI_DRIVER 类库；[Protocols] 声明保证消费方干净链接
-        ├── LvglUefiPort.c          # 生命周期装配：Init → Poll 循环 → Deinit
-        ├── DisplayGop.c            # GOP 显示，DIRECT 直渲，脏区域 Blt
-        ├── InputKeyboard.c         # SimpleTextInEx/SimpleTextIn → LVGL keypad indev
-        ├── InputMouse.c            # AbsolutePointer/SimplePointer → LVGL pointer indev
-        ├── TickTimer.c             # TSC 节拍，Stall 标定一次频率
-        └── MemAlloc.c              # lv_mem_*_core()：AllocatePool/FreePool 实现
+    ├── LvglUefiPort/
+    │   ├── LvglUefiPort.inf        # UEFI_DRIVER 类库；[Protocols] 声明保证消费方干净链接
+    │   ├── LvglUefiPort.c          # 生命周期装配：Init → Poll 循环 → Deinit
+    │   ├── DisplayGop.c            # GOP 显示，DIRECT 直渲，脏区域 Blt
+    │   ├── InputKeyboard.c         # SimpleTextInEx/SimpleTextIn → LVGL keypad indev
+    │   ├── InputMouse.c            # AbsolutePointer/SimplePointer → LVGL pointer indev
+    │   ├── TickTimer.c             # TSC 节拍，Stall 标定一次频率
+    │   └── MemAlloc.c              # lv_mem_*_core()：AllocatePool/FreePool 实现
+    └── LvglUi/                     # 产品无关的 BASE 控件库
 ```
 
 ## 获取源码
@@ -84,16 +87,17 @@ source edksetup.sh
 build -p LvglPkg/LvglPkg.dsc -a X64 -t GCC5
 ```
 
-包的 DSC 会把两个库都编译并链接通过（产物在 `Build/LvglPkg`）。需要说明的是，`LvglPkg.dsc` 是**库级**构建——它验证移植层能编译、能链接，要跑起来还需要一个消费它的应用（见下节）。`DEBUG`/`RELEASE`/`NOOPT` 三种目标均支持。
+包的 DSC 会把三个库都编译并链接通过（产物在 `Build/LvglPkg`）。需要说明的是，`LvglPkg.dsc` 是**库级**构建——它验证移植层能编译、能链接，要跑起来还需要一个消费它的应用（见下节）。`DEBUG`/`RELEASE`/`NOOPT` 三种目标均支持。
 
 ## 接入你自己的包
 
-在平台 DSC 的 `[LibraryClasses]` 里加两条库映射，外加 `CompilerIntrinsicsLib`——MSVC 在无宿主环境下会把结构体拷贝和填充循环合成对 `memcpy`/`memset` 的调用：
+在平台 DSC 的 `[LibraryClasses]` 里加入库映射，外加 `CompilerIntrinsicsLib`——MSVC 在无宿主环境下会把结构体拷贝和填充循环合成对 `memcpy`/`memset` 的调用：
 
 ```ini
 [LibraryClasses]
   LvglLib|LvglPkg/Library/LvglLib/LvglLib.inf
   LvglUefiPort|LvglPkg/Library/LvglUefiPort/LvglUefiPort.inf
+  LvglUi|LvglPkg/Library/LvglUi/LvglUi.inf
   CompilerIntrinsicsLib|MdePkg/Library/CompilerIntrinsicsLib/CompilerIntrinsicsLib.inf
 ```
 
@@ -103,6 +107,7 @@ build -p LvglPkg/LvglPkg.dsc -a X64 -t GCC5
 [LibraryClasses]
   LvglLib
   LvglUefiPort
+  LvglUi
 ```
 
 注意 `LvglUefiPort` 是 `UEFI_DRIVER` 类库（它消费 `gBS` 和 DXE 阶段的库实例），所以要由 DXE 阶段的应用/驱动来链接，`BASE` 模块不行。
@@ -136,6 +141,21 @@ GuiMain (VOID)
 
   return LvglPortDeinit ();
 }
+```
+
+`LvglUi` 控件直接返回由调用者管理的 LVGL 根对象。主题传 `NULL` 时使用中性默认值，事件、尺寸覆盖和删除仍使用标准 LVGL API：
+
+```c
+#include <Library/LvglUi.h>
+
+lv_obj_t *Apply = LvglUiCreateButton (
+                    lv_screen_active (),
+                    "Apply",
+                    LVGL_UI_BUTTON_PRIMARY,
+                    NULL
+                    );
+lv_obj_add_event_cb (Apply, ApplyClicked, LV_EVENT_CLICKED, NULL);
+lv_obj_set_width (Apply, 240);
 ```
 
 辅助接口：`LvglKbdGetModifiers()` 返回 Ctrl/Shift 状态（`LVGL_KBD_MOD_CTRL`/`LVGL_KBD_MOD_SHIFT` 位），界面据此识别 `Ctrl+S` 这类组合键；`LVGL_KEY_PAGE_UP`/`LVGL_KEY_PAGE_DOWN` 自定义键值让翻页键绕过 LVGL 组的焦点导航直接到达焦点控件；`LvglPortGetMouseIndev()` 暴露指针 indev（失败返回 `NULL`）。
@@ -212,6 +232,7 @@ The port is built around a few deliberate engineering decisions that matter in f
 - **TSC-based tick**: frequency calibrated once with a 100 ms `gBS->Stall()`; 64-bit monotonic source, no wraparound, immune to missing/broken timer drivers.
 - **Custom memory hooks**: full `lv_mem_*_core()` family over `AllocatePool`/`FreePool` with an 8-byte size header emulating `realloc`; runtime self-test (`lv_mem_test()`) runs on every init.
 - **1 ms event pump** (`WaitForEvent` on a periodic timer): pumps the TPL notification queue that firmware input drivers depend on, and doubles as the main-loop heartbeat.
+- **Product-neutral core controls**: `LvglUi` provides a neutral theme, Ghost/Primary/Danger buttons, choice cards, and selectable rows using Montserrat 14, flex layouts, and wrapped text.
 - **Tuned `lv_conf.h`**: 32 bpp, `LV_STDLIB_CUSTOM` malloc + built-in string/sprintf (no libc), `LV_OS_NONE`, 33 ms refresh (~30 fps), dark theme, Montserrat 12/14/16 + `unscii_16` monospace fonts, demos/logs disabled.
 - **Toolchains**: MSVC (`/utf-8`, warnings silenced only where upstream code trips them) and GCC flags provided; X64 only.
 
@@ -220,24 +241,26 @@ The port is built around a few deliberate engineering decisions that matter in f
 ```
 LvglPkg/
 ├── LvglPkg.dec                     # package declaration (public headers, library classes)
-├── LvglPkg.dsc                     # package build description (builds the two libraries)
+├── LvglPkg.dsc                     # package build description (builds all three libraries)
 ├── Include/Library/
 │   ├── LvglLib.h                   # single entry header → includes the LVGL mirror's lvgl.h
-│   └── LvglUefiPort.h              # port API: Init / Poll / Deinit, tick, modifiers, cursor
+│   ├── LvglUefiPort.h              # port API: Init / Poll / Deinit, tick, modifiers, cursor
+│   └── LvglUi.h                    # neutral theme and core composite-control API
 └── Library/
     ├── LvglLib/
     │   ├── LvglLib.inf             # generated by GenLvglSources.py — never edit by hand
     │   ├── lv_conf.h               # LVGL configuration, tuned for UEFI (UTF-8, CJK comments)
     │   ├── lvgl/                   # git submodule → upstream lvgl v9.2.2 (pristine mirror)
     │   └── Fonts/                  # SimSun CJK fonts (regenerated here with extra simplified glyphs; the mirror's originals are not compiled)
-    └── LvglUefiPort/
-        ├── LvglUefiPort.inf        # UEFI_DRIVER-class library; [Protocols] declared for clean linking
-        ├── LvglUefiPort.c          # lifecycle assembly: Init → Poll loop → Deinit
-        ├── DisplayGop.c            # GOP display, DIRECT render mode, dirty-region Blt
-        ├── InputKeyboard.c         # SimpleTextInEx/SimpleTextIn → LVGL keypad indev
-        ├── InputMouse.c            # AbsolutePointer/SimplePointer → LVGL pointer indev
-        ├── TickTimer.c             # TSC tick, calibrated once via gBS->Stall()
-        └── MemAlloc.c              # lv_mem_*_core() over AllocatePool/FreePool
+    ├── LvglUefiPort/
+    │   ├── LvglUefiPort.inf        # UEFI_DRIVER-class library; [Protocols] declared for clean linking
+    │   ├── LvglUefiPort.c          # lifecycle assembly: Init → Poll loop → Deinit
+    │   ├── DisplayGop.c            # GOP display, DIRECT render mode, dirty-region Blt
+    │   ├── InputKeyboard.c         # SimpleTextInEx/SimpleTextIn → LVGL keypad indev
+    │   ├── InputMouse.c            # AbsolutePointer/SimplePointer → LVGL pointer indev
+    │   ├── TickTimer.c             # TSC tick, calibrated once via gBS->Stall()
+    │   └── MemAlloc.c              # lv_mem_*_core() over AllocatePool/FreePool
+    └── LvglUi/                     # product-neutral BASE control library
 ```
 
 ## Getting the sources
@@ -266,16 +289,17 @@ source edksetup.sh
 build -p LvglPkg/LvglPkg.dsc -a X64 -t GCC5
 ```
 
-The package DSC compiles and links both libraries (output under `Build/LvglPkg`). Note that `LvglPkg.dsc` is a *library* build — it validates that the port compiles and links; a runnable image needs a consuming application (see below). Both `DEBUG`/`RELEASE`/`NOOPT` targets are supported.
+The package DSC compiles and links all three libraries (output under `Build/LvglPkg`). Note that `LvglPkg.dsc` is a *library* build — it validates that the port compiles and links; a runnable image needs a consuming application (see below). `DEBUG`/`RELEASE`/`NOOPT` targets are supported.
 
 ## Integrate into your package
 
-Add two library mappings to your platform DSC's `[LibraryClasses]` — plus `CompilerIntrinsicsLib`, because MSVC synthesizes `memcpy`/`memset` calls in freestanding builds:
+Add the library mappings to your platform DSC's `[LibraryClasses]` — plus `CompilerIntrinsicsLib`, because MSVC synthesizes `memcpy`/`memset` calls in freestanding builds:
 
 ```ini
 [LibraryClasses]
   LvglLib|LvglPkg/Library/LvglLib/LvglLib.inf
   LvglUefiPort|LvglPkg/Library/LvglUefiPort/LvglUefiPort.inf
+  LvglUi|LvglPkg/Library/LvglUi/LvglUi.inf
   CompilerIntrinsicsLib|MdePkg/Library/CompilerIntrinsicsLib/CompilerIntrinsicsLib.inf
 ```
 
@@ -285,6 +309,7 @@ Declare the library classes in your application's INF:
 [LibraryClasses]
   LvglLib
   LvglUefiPort
+  LvglUi
 ```
 
 `LvglUefiPort` is a `UEFI_DRIVER`-class library (it consumes `gBS` and the DXE-phase library instances), so consume it from DXE applications/drivers, not `BASE` modules.
@@ -318,6 +343,21 @@ GuiMain (VOID)
 
   return LvglPortDeinit ();
 }
+```
+
+`LvglUi` returns caller-owned LVGL root objects. Pass `NULL` for the neutral default theme; use standard LVGL APIs for events, size overrides, and deletion:
+
+```c
+#include <Library/LvglUi.h>
+
+lv_obj_t *Apply = LvglUiCreateButton (
+                    lv_screen_active (),
+                    "Apply",
+                    LVGL_UI_BUTTON_PRIMARY,
+                    NULL
+                    );
+lv_obj_add_event_cb (Apply, ApplyClicked, LV_EVENT_CLICKED, NULL);
+lv_obj_set_width (Apply, 240);
 ```
 
 Additional helpers: `LvglKbdGetModifiers()` returns `Ctrl`/`Shift` state (`LVGL_KBD_MOD_CTRL`/`LVGL_KBD_MOD_SHIFT`) so your UI can recognize combos like `Ctrl+S`; `LVGL_KEY_PAGE_UP`/`LVGL_KEY_PAGE_DOWN` carry the paging keys past LVGL's group navigation; `LvglPortGetMouseIndev()` exposes the pointer indev (or `NULL`).

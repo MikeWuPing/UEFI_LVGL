@@ -14,3 +14,5 @@
   LvglLib|Include/Library/LvglLib.h
   ##  LVGL UEFI port layer (GOP display, keyboard/mouse indev, tick, memory)
   LvglUefiPort|Include/Library/LvglUefiPort.h
+  ##  Product-neutral LVGL v9 core controls
+  LvglUi|Include/Library/LvglUi.h
