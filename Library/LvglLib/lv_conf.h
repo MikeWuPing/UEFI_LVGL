@@ -96,6 +96,11 @@
 #define LV_FONT_SIMSUN_14_CJK 1
 #define LV_FONT_SIMSUN_16_CJK 1
 
+/*Optional 18 px Simplified Chinese firmware UI subset.  The public asset name
+ *does not use the source font's Reserved Font Name.  Montserrat remains the
+ *package-wide default; consumers opt in with &lv_font_zh_cn_ui_18.*/
+#define LV_FONT_CUSTOM_DECLARE LV_FONT_DECLARE(lv_font_zh_cn_ui_18)
+
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 #endif /*LV_CONF_H*/
