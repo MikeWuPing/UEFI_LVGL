@@ -86,6 +86,7 @@ tmpl = """## @file
   CompilerIntrinsicsLib
 """ % (FILE_GUID, "\n".join("  " + s for s in sources))
 
-with open(os.path.join(ROOT, "LvglLib.inf"), "w", newline="\r\n") as fp:
+# Keep generated metadata LF-normalized so regeneration is stable across hosts.
+with open(os.path.join(ROOT, "LvglLib.inf"), "w", newline="\n") as fp:
     fp.write(tmpl)
 print("LvglLib.inf: %d sources" % len(sources))
