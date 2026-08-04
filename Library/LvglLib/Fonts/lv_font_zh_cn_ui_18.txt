@@ -1,0 +1,16 @@
+Font asset: Simplified Chinese firmware UI subset, 18 px, 4 bpp
+Original font: Source Han Sans SC Regular
+Original font version: 2.004
+Source archive: https://github.com/adobe-fonts/source-han-sans/releases/download/2.004R/SourceHanSansSC.zip
+Copyright: Copyright 2014-2021 Adobe (http://www.adobe.com/)
+License: SIL Open Font License 1.1 (SPDX: OFL-1.1)
+License file: Library/LvglLib/Fonts/OFL-SourceHanSans.txt
+Reserved Font Name: Source
+Input SHA-256: 84bbd4ace91d327b3ad1a581c688196278a4e41308520176f419180064e4af2b
+Manifest: Library/LvglLib/Fonts/zh_cn_ui_18_glyphs.txt
+Manifest SHA-256: 8df03487f3936de8a7bb6cf374754353db86c437d3add5cc8a377adcab074514
+Generator: lv_font_conv 1.5.3
+Output: lv_font_zh_cn_ui_18.c
+Output SHA-256: 0b97c9cd00a8677b8a6e923d8d0ea83de9a7f6c5fe24018115712577a77a886f
+Public symbol: lv_font_zh_cn_ui_18
+Generation policy: ASCII U+0020-U+007E plus every remaining manifest codepoint

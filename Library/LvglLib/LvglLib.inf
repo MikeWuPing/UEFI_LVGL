@@ -342,6 +342,7 @@
   lvgl/src/widgets/win/lv_win.c
   Fonts/lv_font_simsun_14_cjk.c
   Fonts/lv_font_simsun_16_cjk.c
+  Fonts/lv_font_zh_cn_ui_18.c
 
 [Packages]
   MdePkg/MdePkg.dec
