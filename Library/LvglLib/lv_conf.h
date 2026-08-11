@@ -98,4 +98,15 @@
 
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
+/*=======================
+ *   PRIVATE API GATE
+ *=======================*/
+
+/* 供应用层读取控件内部状态的开关：lvgl.h 以此门控包含
+ * src/lvgl_private.h（全部控件私有结构体，含 lv_dropdown_t）。
+ * T5 的 MenuBar 用其重置下拉菜单选中态（v9 无公开的清除选中 API，
+ * lv_dropdown_set_selected 对越界索引是钳位而非清除）。仅开放头文件
+ * 可见性，不影响库行为。 */
+#define LV_USE_PRIVATE_API 1
+
 #endif /*LV_CONF_H*/
