@@ -62,7 +62,13 @@ LvglPortDeinit (
 /// Task 10: Tab 从 LV_KEY_NEXT 改为自定义值——区域切换语义（列表↔树↔
 /// 工具栏）改由 Ui 层 ScrKeyCb 分发，LVGL group 不再拦截 Tab 做组内
 /// 焦点导航。取值 0x10000006 顺延于 F5（自定义值仅要求组内唯一）。
+/// Task 24 (gsetupmod): Shift+Tab 映射为自定义 LVGL_KEY_TAB_PREV——
+/// 与 LV_KEY_NEXT 同为 '\t' 上游拦截键的镜像问题（LVGL 无原生
+/// Shift+Tab），端口在 '\t' 分支按 KeyShiftState 的 Shift 修饰位区分
+/// 后映射两个自定义值，Ui 层行焦点循环据此前进/回退。取值 0x10000010
+/// 顺延（自定义值仅要求组内唯一）。upstream 待推。
 #define LVGL_KEY_TAB        0x10000006U
+#define LVGL_KEY_TAB_PREV   0x10000010U
 
 /// Current keyboard modifier state as LVGL_KBD_MOD_* bits, refreshed on
 /// every key event read via SimpleTextInEx. The Ui layer uses this to

@@ -147,8 +147,16 @@ MapEfiKeyToLv (
      Tab=组焦点前移），但组内导航在分区制下无意义且会与对话框焦点篱笆
      冲突——现改映射为自定义值：lv_indev 不拦截（非 NEXT/PREV），以
      KEY 事件发给焦点对象并冒泡到屏幕 ScrKeyCb，由 Ui 层 GuTabNext
-     做列表↔树↔工具栏的区域切换。 */
+     做列表↔树↔工具栏的区域切换。
+     Task 24 (gsetupmod)：Shift+Tab = 自定义 LVGL_KEY_TAB_PREV（行焦点
+     循环回退）。KeyShiftState 的 Shift 修饰位仅在 EFI_SHIFT_STATE_VALID
+     高位有效时可信（SimpleTextIn 兜底路径恒 0——此时 Shift+Tab 退化为
+     Tab，与"组合键不可用"警告口径一致）。 */
   if (Key->UnicodeChar == L'\t') {
+    if ((KeyShiftState & EFI_SHIFT_STATE_VALID) != 0 &&
+        (KeyShiftState & (EFI_LEFT_SHIFT_PRESSED | EFI_RIGHT_SHIFT_PRESSED)) != 0) {
+      return LVGL_KEY_TAB_PREV;
+    }
     return LVGL_KEY_TAB;
   }
 
