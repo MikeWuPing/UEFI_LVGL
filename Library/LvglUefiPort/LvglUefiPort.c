@@ -14,6 +14,8 @@
 #include <Library/LvglLib.h>
 #include <Library/LvglUefiPort.h>
 
+#include "CursorArrow.h"
+
 #include <Uefi.h>
 #include <Library/DebugLib.h>
 #include <Library/UefiBootServicesTableLib.h>
@@ -54,16 +56,16 @@ static EFI_EVENT  mEventPump = NULL;
   为鼠标 indev 挂可见光标（MouseInit 成功后调用；失败则无光标，不致命）。
 
   LVGL 指针 indev 默认没有任何可视光标，M2/M3 下鼠标只能盲点。这里创建
-  一个 10x14 白底黑边小矩形交给 lv_indev_set_cursor()，此后 LVGL 在每次
-  读到指针坐标时自动把它移到当前位置（lv_indev.c 读定时器里的
-  lv_obj_set_pos(cursor, point.x, point.y)），端口层无需再参与。
+  一个 image 对象显示 Windows aero 箭头（CursorArrow.c：从系统
+  aero_arrow.cur 的 32x32 条目提取，ARGB8888 预乘位图），交给
+  lv_indev_set_cursor()。此后 LVGL 在每次读到指针坐标时自动把它移到当前
+  位置（lv_indev.c 读定时器里的 lv_obj_set_pos(cursor, point.x, point.y)），
+  端口层无需再参与。
 
-  样式要点：remove_style_all 清掉主题默认样式后必须显式把 bg_opa 设为
-  LV_OPA_COVER——LV_STYLE_BG_OPA 的属性默认值是 TRANSP，只设 bg_color
-  会得到一个全透明的"隐形光标"。lv_indev_set_cursor() 自身会把光标对象
-  重挂到 display 的 sys layer、去掉 CLICKABLE、加上 FLOATING|
-  IGNORE_LAYOUT（不受父对象滚动与布局影响、不参与命中测试），故这里
-  只负责尺寸与配色。
+  lv_indev_set_cursor() 自身会把光标对象重挂到 display 的 sys layer、
+  去掉 CLICKABLE、加上 FLOATING|IGNORE_LAYOUT（不受父对象滚动与布局影响、
+  不参与命中测试），故这里只负责图像源。箭头位图的 hotspot 在 (0,0)（文件
+  头声明），与 set_pos 的左上对齐语义一致，无需偏移补偿。
 **/
 static
 VOID
@@ -79,18 +81,13 @@ MouseCursorCreate (
     return;
   }
 
-  Cursor = lv_obj_create (lv_screen_active ());
+  Cursor = lv_image_create (lv_screen_active ());
   if (Cursor == NULL) {
     DEBUG ((DEBUG_WARN, "[LvglPort] mouse cursor obj create failed\n"));
     return;
   }
 
-  lv_obj_remove_style_all (Cursor);
-  lv_obj_set_size (Cursor, 10, 14);
-  lv_obj_set_style_bg_color (Cursor, lv_color_white (), 0);
-  lv_obj_set_style_bg_opa (Cursor, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width (Cursor, 1, 0);
-  lv_obj_set_style_border_color (Cursor, lv_color_black (), 0);
+  lv_image_set_src (Cursor, &GdArrowDsc);
   lv_indev_set_cursor (Indev, Cursor);
 }
 

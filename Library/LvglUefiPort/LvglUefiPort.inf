@@ -40,6 +40,7 @@
   MSFT:*_*_*_CC_FLAGS = /utf-8 /wd4189 /wd4244 /wd4267 /wd4100 /wd4204 /wd4819 /WX-
 
 [Sources]
+  CursorArrow.c
   MemAlloc.c
   TickTimer.c
   DisplayGop.c
