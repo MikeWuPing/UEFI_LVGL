@@ -178,8 +178,8 @@ MouseReadCb (
       // 坐标映射与按键沿时改库掩码即可恢复。
       //
       DEBUG ((
-        DEBUG_VERBOSE,
-        "[LvglPort] ptr x=%u y=%u btn=0x%x\n",
+        DEBUG_INFO,
+        "[LvglPort] ptr raw=%u,%u btn=0x%x\n",
         (UINT32)State.CurrentX,
         (UINT32)State.CurrentY,
         (UINT32)State.ActiveButtons
