@@ -48,6 +48,9 @@
   InputMouse.c
   LvglUefiPort.c
 
+[Sources.AARCH64]
+  AArch64GetSystemCount.asm
+
 [Packages]
   MdePkg/MdePkg.dec
   LvglPkg/LvglPkg.dec

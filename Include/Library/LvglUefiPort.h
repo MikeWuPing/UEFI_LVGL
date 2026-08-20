@@ -22,6 +22,13 @@ LvglTickGetMs (
   VOID
   );
 
+/** Read the ARM64 system counter (CNTPCT_EL0). AARCH64 only: X64 builds
+    never reference this symbol (TickTimer.c X64 branch uses AsmReadTsc). */
+UINT64
+AArch64GetSystemCount (
+  VOID
+  );
+
 /// 初始化：定位 GOP、创建 LVGL display、注册键盘/鼠标 indev、挂 tick。
 EFI_STATUS
 LvglPortInit (

@@ -1,5 +1,7 @@
 /** @file
-  LVGL 毫秒 tick 源：基于 X64 TSC（时间戳计数器）实现。
+  LVGL 毫秒 tick 源：X64 基于 TSC（时间戳计数器），AARCH64 基于
+  CNTPCT_EL0 system counter——即 AArch64GetSystemCount()（见下）。
+  TSC (X64) / CNTPCT_EL0 (AARCH64)。
 
   为什么不走 MdePkg 的 TimerLib：对 UEFI 应用可用的几个实例在本场景
   下都不可用——
@@ -9,10 +11,11 @@
       固件从不启动该定时器（TMICT 恒为 0），读数恒 0；
     * OvmfPkg/PcAtChipsetPkg 的 AcpiTimerLib：暴露的是原始 24bit PM
       定时器（3.579545MHz），约 4.7 秒回绕一次，编辑器会话必然踩中。
-  TSC 是 64bit 单调计数器（现代 CPU/QEMU 均为 invariant TSC），不会
-  回绕；LvglPkg 只支持 X64，AsmReadTsc() 恒可用。频率在 LvglTickInit()
-  里用 gBS->Stall() 标定一次即可——OVMF 的 Stall 基于 PM 定时器，精度
-  足够 UI tick 使用。
+  TSC/CNTPCT_EL0 都是 64bit 单调计数器（现代 CPU/QEMU 均 invariant），
+  不会回绕：X64 用 AsmReadTsc()，AARCH64 用 AArch64GetSystemCount()
+  （UEFI app 运行在 EL1，EL1 读 CNTPCT_EL0 不受 CNTKCTL_EL1.EL0PCTEN
+  门控，不会 trap）。频率在 LvglTickInit() 里用 gBS->Stall() 标定一次
+  即可——OVMF 的 Stall 基于 PM 定时器，精度足够 UI tick 使用。
 **/
 
 #include <Library/LvglUefiPort.h>
@@ -39,9 +42,17 @@ LvglTickInit (
   UINT64  Tsc0;
   UINT64  Tsc1;
 
+#if defined (MDE_CPU_AARCH64)
+  Tsc0 = AArch64GetSystemCount ();
+#else
   Tsc0 = AsmReadTsc ();
+#endif
   gBS->Stall (LV_TICK_CALIBRATION_US);
+#if defined (MDE_CPU_AARCH64)
+  Tsc1 = AArch64GetSystemCount ();
+#else
   Tsc1 = AsmReadTsc ();
+#endif
 
   //
   // 频率 = 差值 * 1e6 / 窗口微秒数。先乘后除，不要求窗口整除 1e6；
@@ -57,7 +68,11 @@ LvglTickInit (
     mTscFreq = 1000000;
   }
 
+#if defined (MDE_CPU_AARCH64)
+  mTscStart = AArch64GetSystemCount ();
+#else
   mTscStart = AsmReadTsc ();
+#endif
 }
 
 /**
@@ -77,7 +92,11 @@ LvglTickGetMs (
     return 0;
   }
 
+#if defined (MDE_CPU_AARCH64)
+  Elapsed = AArch64GetSystemCount () - mTscStart;
+#else
   Elapsed = AsmReadTsc () - mTscStart;
+#endif
   //
   // mTscFreq/1000 对任何现实的 TSC 频率（< 4.3GHz）都远小于 2^32，
   // 且整除截断带来的相对误差在 30ppm 量级（一小时误差 < 0.5ms），
