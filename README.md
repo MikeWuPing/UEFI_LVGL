@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![LVGL](https://img.shields.io/badge/LVGL-9.2.2-green.svg)](https://github.com/lvgl/lvgl)
 [![EDK2](https://img.shields.io/badge/Platform-UEFI%20/%20EDK2-orange.svg)](https://github.com/tianocore/edk2)
-[![Arch](https://img.shields.io/badge/Arch-X64-blueviolet.svg)](LvglPkg.dsc)
+[![Arch](https://img.shields.io/badge/Arch-X64%2FAArch64-blueviolet.svg)](LvglPkg.dsc)
 
 **LVGL v9 for UEFI** —— 一个把 [LVGL](https://github.com/lvgl/lvgl) 图形库搬进 UEFI 固件环境的 EDK2 软件包，自带完整的 UEFI 移植层（GOP 显示、键盘、鼠标、节拍时钟与内存管理）。
 
@@ -27,11 +27,11 @@
 - **GOP 显示驱动**：整屏后备缓冲 + `LV_DISPLAY_RENDER_MODE_DIRECT` 直渲模式，按脏区域调用 `Gop->Blt` 提交；像素格式原生 `XRGB8888`，**零转换**；`PixelBitMask` 模式（可变位宽，如 30bit HDR）直接拒绝。
 - **键盘 indev**：优先 `SimpleTextInEx`（可通过 `LvglKbdGetModifiers()` 读取 Ctrl/Shift 状态），`SimpleTextIn` 兜底；自动合成 `PRESSED → RELEASED` 沿——UEFI 只上报按下、LVGL 只在上升沿派发按键，两者之间必须补一条释放事件。
 - **鼠标 indev**：优先 `AbsolutePointer`（绝对坐标线性映射到屏幕像素），`SimplePointer` 兜底；对 ConSplitter 虚拟聚合实例做了加固（真实设备必带设备路径，虚拟句柄没有）；通过 `lv_indev_set_cursor()` 挂上可见光标。
-- **TSC 节拍源**：用一次 100ms `gBS->Stall()` 标定频率；64 位单调计数不回绕，定时器驱动缺失或损坏时照常工作。
+- **双架构节拍源**：X64 用 TSC，AARCH64 用 `CNTPCT_EL0` 系统计数器（`AArch64GetSystemCount`，armasm64 汇编）——两者都是 64 位单调计数，用一次 100ms `gBS->Stall()` 标定频率，不回绕，定时器驱动缺失或损坏时照常工作。
 - **自定义内存钩子**：完整的 `lv_mem_*_core()` 函数族基于 `AllocatePool`/`FreePool`，块头 8 字节记录请求尺寸以模拟 `realloc`；每次初始化都跑 `lv_mem_test()` 运行时自检。
 - **1ms 事件泵**（`WaitForEvent` 周期定时器）：派发固件输入驱动赖以填充键队列的 TPL 通知，同时充当主循环节拍。
 - **定制 `lv_conf.h`**：32bpp、`LV_STDLIB_CUSTOM` malloc + 内置 string/sprintf（不碰 libc）、`LV_OS_NONE`、33ms 刷新周期（约 30fps）、深色主题、Montserrat 12/14/16 + `unscii_16` 等宽字体、关闭 demo 与日志。
-- **工具链**：MSVC（`/utf-8`，只对上游代码触发的告警做压制）与 GCC 编译选项齐备；仅支持 X64。
+- **工具链**：MSVC（`/utf-8`，只对上游代码触发的告警做压制）与 GCC 编译选项齐备；支持 **X64 与 AARCH64** 双架构（`-a X64` / `-a AARCH64`，同一工具链 tag，产物自动分目录）。
 
 ## 目录结构
 
@@ -54,7 +54,7 @@ LvglPkg/
         ├── DisplayGop.c            # GOP 显示，DIRECT 直渲，脏区域 Blt
         ├── InputKeyboard.c         # SimpleTextInEx/SimpleTextIn → LVGL keypad indev
         ├── InputMouse.c            # AbsolutePointer/SimplePointer → LVGL pointer indev
-        ├── TickTimer.c             # TSC 节拍，Stall 标定一次频率
+        ├── TickTimer.c             # 双架构节拍：X64 TSC / AARCH64 CNTPCT_EL0，Stall 标定一次频率
         └── MemAlloc.c              # lv_mem_*_core()：AllocatePool/FreePool 实现
 ```
 
@@ -78,11 +78,15 @@ git submodule update --init
 # Windows / MSVC
 edksetup.bat
 build -p LvglPkg/LvglPkg.dsc -a X64 -t VS2022
+build -p LvglPkg/LvglPkg.dsc -a AARCH64 -t VS2019
 
 # Linux / GCC
 source edksetup.sh
 build -p LvglPkg/LvglPkg.dsc -a X64 -t GCC5
+build -p LvglPkg/LvglPkg.dsc -a AARCH64 -t GCC
 ```
+
+`SUPPORTED_ARCHITECTURES = X64|AARCH64`：X64 与 AARCH64 可在同一工作区共存（产物按 `-a` 自动分目录）；AARCH64 的 MSVC 路径需要 VS2019 的 ARM64 编译工具（`Hostx64/arm64/cl.exe` + `armasm64.exe`），汇编文件用 armasm64 语法（`[Sources.AARCH64]` 分区）。
 
 包的 DSC 会把两个库都编译并链接通过（产物在 `Build/LvglPkg`）。需要说明的是，`LvglPkg.dsc` 是**库级**构建——它验证移植层能编译、能链接，要跑起来还需要一个消费它的应用（见下节）。`DEBUG`/`RELEASE`/`NOOPT` 三种目标均支持。
 
@@ -149,7 +153,7 @@ GuiMain (VOID)
 - **零转换像素路径。** `EFI_GRAPHICS_OUTPUT_BLT_PIXEL` 的内存布局恒为 `B,G,R,X`；LVGL v9 的 32bit 格式只有 `ARGB8888`/`XRGB8888`，内存字节序同样是 `B,G,R,X`。后备缓冲按 `LV_COLOR_FORMAT_XRGB8888` 原生渲染后直接交给 `Gop->Blt`，逐字节吻合，1080p 下不做任何逐像素转换。
 - **DIRECT 直渲模式。** 配合整屏后备缓冲，LVGL 只渲染脏区域，flush 回调也只按脏区域提交——文本编辑器每敲一个键只失效几行，渲染量和 Blt 流量都远小于 FULL 模式。`LV_DRAW_BUF_STRIDE_ALIGN` 保持默认值，flush 源行距恰为整屏行跨距 `屏宽 × 4`。
 - **事件泵是承重墙。** 固件输入驱动（PS/2、USB 鼠标）靠 `TPL_NOTIFY` 定时器通知把按键填进队列，而通知只在 TPL 降级时派发——纯 `Stall()` 轮询循环永远不给固件这个机会，键队列恒空，表现为收不到任何按键。`LvglPortPoll()` 等一个 1ms 周期定时器事件，既派发了全部挂起通知，又当了循环节拍。
-- **tick 回调必须在 `lv_init()` 之后挂接。** `lv_global_init()` 会对整个 LVGL 全局状态 memzero（含 tick 回调），提前挂接会被悄悄清零，tick 冻结在 0。节拍源选 TSC 是因为 DXE 应用可用的 `TimerLib` 实例各有硬伤：空模板直接 ASSERT、APIC 定时器固件从不启动、AcpiTimerLib 是 24bit PM 定时器约 4.7 秒回绕一次。
+- **tick 回调必须在 `lv_init()` 之后挂接。** `lv_global_init()` 会对整个 LVGL 全局状态 memzero（含 tick 回调），提前挂接会被悄悄清零，tick 冻结在 0。节拍源不用 `TimerLib` 是因为 DXE 应用可用的实例各有硬伤：空模板直接 ASSERT、APIC 定时器固件从不启动、AcpiTimerLib 是 24bit PM 定时器约 4.7 秒回绕一次——所以 X64 直读 TSC、AARCH64 直读 `CNTPCT_EL0`（UEFI 应用运行在 EL1，读它不受 `EL0PCTEN` 门控），两个都是 64 位单调计数。
 - **按下/抬起沿合成。** `ReadKeyStroke(Ex)` 只上报按下；LVGL 的 keypad indev 只在上升沿（`PRESSED` after `RELEASED`）派发键值。连续两个 PRESSED 中间没有 RELEASED，第二个键会被当成"正在按下"长按重复——快速打字必然丢键。驱动在消费下一个键前先补发一条同键值的 `RELEASED`。
 - **`SimpleTextInEx` 才有修饰键。** 扩展协议的 `KeyShiftState` 是 UEFI 里读 Ctrl/Shift 的唯一途径；兜底路径按键可用但无修饰键信息（初始化时打 `DEBUG_WARN` 提示组合键不可用）。
 - **真实绝对指针优先。** 绝对设备按 `CurrentX × 屏宽 / MaxX` 线性映射；`SimplePointer` 从屏幕中心累计相对位移，按 `max(1, Resolution / 16)` counts-per-pixel 缩放并保留亚像素余数，最终钳制到屏幕边界。协议选择顺序是“真实 Absolute → 真实 Simple → fallback Absolute → fallback Simple”，避免 ConSplitter 虚拟 Absolute 抢占真实相对设备（真实设备带设备路径，虚拟聚合句柄没有）。
@@ -175,7 +179,7 @@ GuiMain (VOID)
 
 ## 环境要求与已知限制
 
-**环境要求：** EDK2（仅 `MdePkg`）、X64 架构、带 GOP 控制台的 DXE 阶段、MSVC（VS2019/2022）或 GCC 工具链。
+**环境要求：** EDK2（仅 `MdePkg`）、**X64 或 AARCH64 架构**（AARCH64 的 MSVC 路径需 VS2019 ARM64 编译工具）、带 GOP 控制台的 DXE 阶段、MSVC（VS2019/2022）或 GCC 工具链。
 
 **已知限制：**
 - 仅 X64、单线程（`LV_OS_NONE`）、仅 DXE 阶段——移植层消费 `gBS`/`AllocatePool`。
@@ -210,11 +214,11 @@ The port is built around a few deliberate engineering decisions that matter in f
 - **GOP display driver**: full-screen back buffer in `LV_DISPLAY_RENDER_MODE_DIRECT` mode, dirty-region `Gop->Blt` submission, native `XRGB8888` pixels with **zero conversion**; `PixelBitMask` modes rejected up front.
 - **Keyboard indev**: `SimpleTextInEx` preferred (Ctrl/Shift modifier state exposed via `LvglKbdGetModifiers()`), `SimpleTextIn` fallback; synthesized `PRESSED → RELEASED` edges so LVGL dispatches every key (UEFI only reports presses, LVGL only dispatches on the rising edge).
 - **Mouse indev**: `AbsolutePointer` preferred with linear absolute→pixel mapping, `SimplePointer` fallback; ConSplitter virtual-instance hardening (real devices carry a device path, the virtual aggregator does not); visible cursor via `lv_indev_set_cursor()`.
-- **TSC-based tick**: frequency calibrated once with a 100 ms `gBS->Stall()`; 64-bit monotonic source, no wraparound, immune to missing/broken timer drivers.
+- **Dual-arch tick**: X64 reads TSC, AARCH64 reads the `CNTPCT_EL0` system counter (`AArch64GetSystemCount`, armasm64 assembly); frequency calibrated once with a 100 ms `gBS->Stall()`; 64-bit monotonic source, no wraparound, immune to missing/broken timer drivers.
 - **Custom memory hooks**: full `lv_mem_*_core()` family over `AllocatePool`/`FreePool` with an 8-byte size header emulating `realloc`; runtime self-test (`lv_mem_test()`) runs on every init.
 - **1 ms event pump** (`WaitForEvent` on a periodic timer): pumps the TPL notification queue that firmware input drivers depend on, and doubles as the main-loop heartbeat.
 - **Tuned `lv_conf.h`**: 32 bpp, `LV_STDLIB_CUSTOM` malloc + built-in string/sprintf (no libc), `LV_OS_NONE`, 33 ms refresh (~30 fps), dark theme, Montserrat 12/14/16 + `unscii_16` monospace fonts, demos/logs disabled.
-- **Toolchains**: MSVC (`/utf-8`, warnings silenced only where upstream code trips them) and GCC flags provided; X64 only.
+- **Toolchains**: MSVC (`/utf-8`, warnings silenced only where upstream code trips them) and GCC flags provided; supports **X64 and AARCH64** (same toolchain tag, `-a X64` / `-a AARCH64`, output dirs separated automatically).
 
 ## Repository layout
 
@@ -237,7 +241,7 @@ LvglPkg/
         ├── DisplayGop.c            # GOP display, DIRECT render mode, dirty-region Blt
         ├── InputKeyboard.c         # SimpleTextInEx/SimpleTextIn → LVGL keypad indev
         ├── InputMouse.c            # AbsolutePointer/SimplePointer → LVGL pointer indev
-        ├── TickTimer.c             # TSC tick, calibrated once via gBS->Stall()
+        ├── TickTimer.c             # Dual-arch tick: TSC (X64) / CNTPCT_EL0 (AARCH64), calibrated via gBS->Stall()
         └── MemAlloc.c              # lv_mem_*_core() over AllocatePool/FreePool
 ```
 
@@ -261,11 +265,15 @@ git submodule update --init
 # Windows / MSVC
 edksetup.bat
 build -p LvglPkg/LvglPkg.dsc -a X64 -t VS2022
+build -p LvglPkg/LvglPkg.dsc -a AARCH64 -t VS2019
 
 # Linux / GCC
 source edksetup.sh
 build -p LvglPkg/LvglPkg.dsc -a X64 -t GCC5
+build -p LvglPkg/LvglPkg.dsc -a AARCH64 -t GCC
 ```
+
+`SUPPORTED_ARCHITECTURES = X64|AARCH64`：X64 与 AARCH64 可在同一工作区共存（产物按 `-a` 自动分目录）；AARCH64 的 MSVC 路径需要 VS2019 的 ARM64 编译工具（`Hostx64/arm64/cl.exe` + `armasm64.exe`），汇编文件用 armasm64 语法（`[Sources.AARCH64]` 分区）。
 
 The package DSC compiles and links both libraries (output under `Build/LvglPkg`). Note that `LvglPkg.dsc` is a *library* build — it validates that the port compiles and links; a runnable image needs a consuming application (see below). Both `DEBUG`/`RELEASE`/`NOOPT` targets are supported.
 
@@ -332,7 +340,7 @@ The interesting engineering is in the details, most of which took real debugging
 - **Zero-conversion pixels.** `EFI_GRAPHICS_OUTPUT_BLT_PIXEL` is always `B,G,R,X` in memory; LVGL v9's only 32-bit formats are `ARGB8888`/`XRGB8888`, whose memory layout is also `B,G,R,X`. The back buffer is rendered natively in `LV_COLOR_FORMAT_XRGB8888` and handed to `Gop->Blt` byte-for-byte — no per-pixel conversion, which matters at 1080p.
 - **DIRECT render mode.** With a full-screen back buffer, LVGL renders only dirty regions and the flush callback submits only dirty regions — ideal for text editors where each keystroke invalidates a few lines. `LV_DRAW_BUF_STRIDE_ALIGN` stays at its default so the flush source stride is exactly `pitch × 4`.
 - **The event pump is load-bearing.** Firmware input drivers (PS/2, USB mouse) enqueue keystrokes via `TPL_NOTIFY` timer notifications, which are only dispatched when TPL is lowered — a pure `Stall()` polling loop never gives the firmware that chance and the key queue stays empty forever. `LvglPortPoll()` waits on a 1 ms periodic timer event, which both drains those notifications and paces the loop.
-- **Tick callback must be registered *after* `lv_init()`.** `lv_global_init()` memzeros all LVGL global state including the tick callback; registering earlier gets silently wiped and the tick freezes at 0. A TSC-based source is used because every `TimerLib` instance available to DXE applications is broken in this scenario (null template, never-started APIC timer, or a 24-bit PM timer that wraps every ~4.7 s).
+- **Tick callback must be registered *after* `lv_init()`.** `lv_global_init()` memzeros all LVGL global state including the tick callback; registering earlier gets silently wiped and the tick freezes at 0. A `TimerLib` source is deliberately avoided because every instance available to DXE applications is broken in this scenario (null template, never-started APIC timer, or a 24-bit PM timer that wraps every ~4.7 s) — so X64 reads TSC directly and AARCH64 reads `CNTPCT_EL0` (UEFI applications run at EL1, where the read is not gated by `EL0PCTEN`); both are 64-bit monotonic counters.
 - **Press/release edge synthesis.** `ReadKeyStroke(Ex)` only reports presses; LVGL's keypad indev only dispatches a key on the *rising* edge (`PRESSED` after `RELEASED`). Two consecutive presses without a release would be treated as one long keypress — fast typing would silently drop keys. The driver synthesizes a matching `RELEASED` before consuming the next key.
 - **`SimpleTextInEx` for modifiers.** The extended protocol's `KeyShiftState` is the only way to read Ctrl/Shift in UEFI; the fallback path works but reports no modifiers (a `DEBUG_WARN` tells you when).
 - **Real AbsolutePointer first.** Absolute devices use a linear `CurrentX × width / MaxX` mapping; `SimplePointer` starts at screen center, accumulates relative motion using `max(1, Resolution / 16)` counts per pixel with subpixel remainders, and clamps the result to the display. Selection follows real Absolute → real Simple → fallback Absolute → fallback Simple, so a ConSplitter virtual Absolute handle cannot mask a real relative device (real devices carry a device path; virtual aggregators do not).
@@ -361,7 +369,7 @@ The file carries UTF-8 CJK comments on purpose; the `LvglLib.inf` build options 
 **Requirements:** EDK2 (`MdePkg` only), X64 architecture, DXE phase with a GOP console, MSVC (VS2019/2022) or GCC toolchain.
 
 **Known limitations:**
-- X64 only, single-threaded (`LV_OS_NONE`), DXE phase only — the port consumes `gBS`/`AllocatePool`.
+- X64 / AARCH64, single-threaded (`LV_OS_NONE`), DXE phase only — the port consumes `gBS`/`AllocatePool`.
 - `PixelBitMask` GOP modes (variable-width channels, e.g. 30-bit HDR) are rejected — the render contract is fixed `BGRX8888`.
 - `SimpleTextIn` fallback: basic keys work, but no Ctrl/Shift state (combos unavailable).
 - `SimplePointer` fallback supports relative motion and the left button; right-click, wheel, and pointer acceleration are not mapped yet.
