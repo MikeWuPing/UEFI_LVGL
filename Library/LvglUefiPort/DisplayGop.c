@@ -116,6 +116,86 @@ GopDisplayInit (
     return Status;
   }
 
+  //
+  // 分辨率自适应（BUILD 123）：枚举 GOP 模式，力争 >= 1280x800（UI 设计
+  // 尺寸下限）。目标 = 宽 >=1280 且高 >=800 的最小面积模式；当前模式已
+  // 达标则不动（QEMU 取证在 1280x800 下零变化的关键）；SetMode 失败时
+  // GOP 保持原当前模式（UEFI 规范），即自然降级——WindowFrame 的低分辨
+  // 率警告与窗口壳居中在应用侧继续兜底。
+  //
+  {
+    UINTN   I;
+    UINTN   ModeCount = mGop->Mode->MaxMode;
+    UINTN   Best      = (UINTN)-1;
+    UINTN   BestW     = 0;
+    UINTN   BestH     = 0;
+    UINT64  BestArea  = (UINT64)-1;
+
+    if (mGop->Mode->Info->HorizontalResolution >= 1280 &&
+        mGop->Mode->Info->VerticalResolution >= 800)
+    {
+      DEBUG ((
+        DEBUG_INFO,
+        "[LvglPort] gop modes: %u (cur %ux%u) -> keep (already >= 1280x800)\n",
+        (UINT32)ModeCount,
+        (UINT32)mGop->Mode->Info->HorizontalResolution,
+        (UINT32)mGop->Mode->Info->VerticalResolution
+        ));
+    } else {
+      for (I = 0; I < ModeCount; I++) {
+        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *M = NULL;
+        UINTN   Size = 0;
+
+        Status = mGop->QueryMode (mGop, I, &Size, &M);
+        if (EFI_ERROR (Status) || M == NULL) {
+          continue;
+        }
+        if (M->HorizontalResolution >= 1280 && M->VerticalResolution >= 800) {
+          UINT64  Area = (UINT64)M->HorizontalResolution
+                         * (UINT64)M->VerticalResolution;
+
+          if (Area < BestArea) {
+            BestArea = Area;
+            Best     = I;
+            BestW    = M->HorizontalResolution;
+            BestH    = M->VerticalResolution;
+          }
+        }
+      }
+      if (Best != (UINTN)-1) {
+        Status = mGop->SetMode (mGop, Best);
+        if (EFI_ERROR (Status)) {
+          DEBUG ((
+            DEBUG_WARN,
+            "[LvglPort] gop modes: target mode %u (%ux%u) SetMode failed: "
+            "%r - keep current %ux%u\n",
+            (UINT32)Best, (UINT32)BestW, (UINT32)BestH,
+            Status,
+            (UINT32)mGop->Mode->Info->HorizontalResolution,
+            (UINT32)mGop->Mode->Info->VerticalResolution
+            ));
+        } else {
+          DEBUG ((
+            DEBUG_INFO,
+            "[LvglPort] gop modes: %u modes, set %ux%u (mode %u)\n",
+            (UINT32)ModeCount,
+            (UINT32)mGop->Mode->Info->HorizontalResolution,
+            (UINT32)mGop->Mode->Info->VerticalResolution,
+            (UINT32)Best
+            ));
+        }
+      } else {
+        DEBUG ((
+          DEBUG_WARN,
+          "[LvglPort] gop modes: %u modes, none >= 1280x800 - keep current %ux%u\n",
+          (UINT32)ModeCount,
+          (UINT32)mGop->Mode->Info->HorizontalResolution,
+          (UINT32)mGop->Mode->Info->VerticalResolution
+          ));
+      }
+    }
+  }
+
   Info = mGop->Mode->Info;
   mHor = Info->HorizontalResolution;
   mVer = Info->VerticalResolution;
