@@ -50,6 +50,7 @@
 
 [Sources.AARCH64]
   AArch64GetSystemCount.asm
+  AArch64GetSystemCount.S | GCC
 
 [Packages]
   MdePkg/MdePkg.dec
